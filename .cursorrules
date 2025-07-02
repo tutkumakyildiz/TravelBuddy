@@ -1,0 +1,25 @@
+# LocalTravelBuddy Project Rules
+
+## Core Requirements
+
+1. **Offline First**: This application should work offline. All functionality must be available without internet connectivity.
+
+2. **AI Model**: This application will use Google Gemma 3n as the AI model (it's multimodal - supports text, image, and audio processing).
+
+3. **Simple UI**: This application will be a 1-page UI with:
+   - Maps integration
+   - Microphone symbol (for voice input)
+   - Camera symbol (for image capture)
+
+4. **Map Service**: This app will use a map placeholder for MVP, with real maps to be added later.
+
+5. **MVP Approach**: This is a Minimum Viable Product. Keep it simple and focus on core functionality only.
+
+## Development Guidelines
+
+- Prioritize offline functionality in all design decisions
+- Minimize complexity - this is an MVP
+- Ensure all features work without internet connection
+- Focus on the essential: maps, voice, and camera integration
+- Use map placeholder for MVP; add real maps when ready for development build
+- Integrate Google Gemma 3n for AI processing 
