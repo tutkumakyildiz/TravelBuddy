@@ -3,12 +3,19 @@ import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, View, TouchableOpacity, Alert, Text, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AIService from './services/AIService';
+import AudioService from './services/AudioService';
+import CameraModal from './components/CameraModal';
 
 export default function App() {
   const [isRecording, setIsRecording] = useState(false);
   const [aiInitialized, setAiInitialized] = useState(false);
   const [aiLoading, setAiLoading] = useState(true);
   const [lastAiResponse, setLastAiResponse] = useState<string>('');
+  const [cameraModalVisible, setCameraModalVisible] = useState(false);
+  const [isProcessingAudio, setIsProcessingAudio] = useState(false);
+  
+  // Temporary debug mode - set to true to test UI flow without actual recording
+  const [debugMode] = useState(true);
 
   // Initialize AI service on app start
   useEffect(() => {
@@ -41,34 +48,115 @@ export default function App() {
   };
 
   const handleMicrophonePress = async () => {
-    setIsRecording(!isRecording);
-    
     if (!aiInitialized) {
       Alert.alert('AI Not Ready', 'Please ensure Quantized Gemma 3n model is properly installed.');
       return;
     }
 
+    const audioService = AudioService.getInstance();
+
+    // Debug mode for testing UI flow
+    if (debugMode) {
+      if (!isRecording) {
+        console.log('🐛 DEBUG: Simulating recording start');
+        setIsRecording(true);
+        return;
+      } else {
+        console.log('🐛 DEBUG: Simulating recording stop and processing');
+        setIsRecording(false);
+        setIsProcessingAudio(true);
+        
+        // Simulate processing delay
+        setTimeout(async () => {
+          const aiService = AIService.getInstance();
+          const response = await aiService.processAudio('debug://fake-uri', 'What are the best restaurants nearby?');
+          
+          setLastAiResponse(response.text || '');
+          Alert.alert('Debug AI Voice Response', response.text || 'No response generated');
+          setIsProcessingAudio(false);
+        }, 2000);
+        return;
+      }
+    }
+
     if (!isRecording) {
       // Start recording
       try {
-        // TODO: Implement actual voice recording
-        // For now, simulate with a test prompt
+        console.log('🎤 Starting voice recording...');
+        const recordingStarted = await audioService.startRecording();
+        
+        if (recordingStarted) {
+          setIsRecording(true);
+          console.log('🔴 Recording started successfully - UI state updated');
+          
+          // Auto-stop recording after 30 seconds to prevent hanging
+          setTimeout(async () => {
+            if (audioService.getRecordingStatus().isRecording) {
+              console.log('⏰ Auto-stopping recording after 30 seconds');
+              handleMicrophonePress(); // This will trigger the stop logic
+            }
+          }, 30000);
+        } else {
+          console.error('❌ Recording failed to start');
+          Alert.alert(
+            'Recording Error', 
+            'Unable to start recording. Please check microphone permissions in your device settings.',
+            [
+              { text: 'OK', style: 'default' }
+            ]
+          );
+        }
+      } catch (error) {
+        console.error('❌ Exception during recording start:', error);
+        Alert.alert('Recording Error', `Failed to start voice recording: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
+    } else {
+      // Stop recording and process
+      try {
+        console.log('⏹️ Stopping voice recording...');
+        setIsRecording(false);
+        setIsProcessingAudio(true);
+        
+        const audioUri = await audioService.stopRecording();
+        
+        if (!audioUri) {
+          Alert.alert('Recording Error', 'No audio was recorded');
+          setIsProcessingAudio(false);
+          return;
+        }
+
+        console.log('🗣️ Processing speech to text...');
+        // Convert speech to text
+        const speechResult = await audioService.speechToText(audioUri);
+        
+        if (speechResult.error) {
+          Alert.alert('Speech Recognition Error', speechResult.error);
+          setIsProcessingAudio(false);
+          await audioService.cleanup();
+          return;
+        }
+
+        console.log('🤖 Processing with AI:', speechResult.text);
+        // Process with AI
         const aiService = AIService.getInstance();
-        const response = await aiService.processText("What are the best travel destinations nearby?");
+        const response = await aiService.processAudio(audioUri, speechResult.text);
+        
+        // Clean up audio file
+        await audioService.cleanup();
         
         if (response.error) {
           Alert.alert('AI Error', response.error);
         } else {
           setLastAiResponse(response.text || '');
-          Alert.alert('AI Response', response.text || 'No response generated');
+          Alert.alert('AI Voice Response', response.text || 'No response generated');
         }
       } catch (error) {
         console.error('Voice processing error:', error);
         Alert.alert('Error', 'Failed to process voice input');
+        await audioService.cleanup();
+      } finally {
+        setIsProcessingAudio(false);
       }
-    } else {
-      // Stop recording
-      Alert.alert('Voice Recording', 'Recording stopped (functionality to be implemented)');
     }
   };
 
@@ -78,22 +166,17 @@ export default function App() {
       return;
     }
 
-    try {
-      // TODO: Implement actual camera capture
-      // For now, simulate with a test image analysis
-      const aiService = AIService.getInstance();
-      const response = await aiService.processImage('placeholder_image_uri', 'What interesting places can you see in this image?');
-      
-      if (response.error) {
-        Alert.alert('AI Error', response.error);
-      } else {
-        setLastAiResponse(response.text || '');
-        Alert.alert('AI Image Analysis', response.text || 'No analysis available');
-      }
-    } catch (error) {
-      console.error('Image processing error:', error);
-      Alert.alert('Error', 'Failed to process image');
-    }
+    console.log('Camera button pressed, opening modal...');
+    setCameraModalVisible(true);
+  };
+
+  const handlePhotoAnalyzed = (response: string) => {
+    setLastAiResponse(response);
+    Alert.alert('AI Photo Analysis', response);
+  };
+
+  const handleCloseCameraModal = () => {
+    setCameraModalVisible(false);
   };
 
   const handleMapPress = async () => {
@@ -163,11 +246,31 @@ export default function App() {
           </View>
 
           {/* Last AI Response Display */}
-          {lastAiResponse && (
+          {lastAiResponse && !isRecording && !isProcessingAudio && (
             <View style={styles.responseOverlay}>
               <Text style={styles.responseText} numberOfLines={3}>
                 🤖 {lastAiResponse}
               </Text>
+            </View>
+          )}
+
+          {/* Recording Status Display */}
+          {isRecording && (
+            <View style={styles.recordingOverlay}>
+              <View style={styles.recordingIndicator}>
+                <View style={styles.recordingDot} />
+                <Text style={styles.recordingText}>🎤 Listening...</Text>
+              </View>
+              <Text style={styles.recordingSubtext}>Tap microphone to stop</Text>
+            </View>
+          )}
+
+          {/* Processing Status Display */}
+          {isProcessingAudio && (
+            <View style={styles.processingOverlay}>
+              <ActivityIndicator size="large" color="#007AFF" />
+              <Text style={styles.processingText}>🗣️ Processing speech...</Text>
+              <Text style={styles.processingSubtext}>Converting voice to text</Text>
             </View>
           )}
         </View>
@@ -180,16 +283,21 @@ export default function App() {
           style={[
             styles.controlButton, 
             isRecording && styles.recordingButton,
+            isProcessingAudio && styles.processingButton,
             !aiInitialized && styles.disabledButton
           ]} 
           onPress={handleMicrophonePress}
-          disabled={!aiInitialized && !aiLoading}
+          disabled={!aiInitialized || isProcessingAudio}
         >
-          <Ionicons 
-            name={isRecording ? "mic" : "mic-outline"} 
-            size={32} 
-            color={isRecording ? "#ff4444" : (!aiInitialized ? "#666" : "#ffffff")} 
-          />
+          {isProcessingAudio ? (
+            <ActivityIndicator size="small" color="#ffffff" />
+          ) : (
+            <Ionicons 
+              name={isRecording ? "mic" : "mic-outline"} 
+              size={32} 
+              color={isRecording ? "#ff4444" : (!aiInitialized ? "#666" : "#ffffff")} 
+            />
+          )}
         </TouchableOpacity>
 
         {/* Camera Button */}
@@ -208,6 +316,13 @@ export default function App() {
           />
         </TouchableOpacity>
       </View>
+
+      {/* Camera Modal */}
+      <CameraModal
+        visible={cameraModalVisible}
+        onClose={handleCloseCameraModal}
+        onPhotoAnalyzed={handlePhotoAnalyzed}
+      />
 
       <StatusBar style="auto" />
     </View>
@@ -350,8 +465,68 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 68, 68, 0.2)',
     borderColor: '#ff4444',
   },
+  processingButton: {
+    backgroundColor: 'rgba(0, 122, 255, 0.2)',
+    borderColor: '#007AFF',
+  },
   disabledButton: {
     backgroundColor: 'rgba(0, 0, 0, 0.3)',
     borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  // Recording status styles
+  recordingOverlay: {
+    position: 'absolute',
+    bottom: 120,
+    left: 20,
+    right: 20,
+    backgroundColor: 'rgba(255, 68, 68, 0.9)',
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  recordingIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  recordingDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#ffffff',
+    marginRight: 8,
+  },
+  recordingText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  recordingSubtext: {
+    color: '#ffffff',
+    fontSize: 12,
+    opacity: 0.9,
+  },
+  // Processing status styles
+  processingOverlay: {
+    position: 'absolute',
+    bottom: 120,
+    left: 20,
+    right: 20,
+    backgroundColor: 'rgba(0, 122, 255, 0.9)',
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  processingText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginTop: 12,
+  },
+  processingSubtext: {
+    color: '#ffffff',
+    fontSize: 12,
+    marginTop: 4,
+    opacity: 0.9,
   },
 });
