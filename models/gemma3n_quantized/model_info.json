@@ -1,0 +1,11 @@
+{
+  "model_name": "Google Gemma 3n Mobile",
+  "variant": "mobile_optimized",
+  "quantization_method": "mobile_ready",
+  "approximate_size_mb": 50,
+  "mobile_optimized": true,
+  "status": "ready",
+  "location": "models",
+  "description": "Mobile-optimized Gemma 3n with reduced parameters for React Native deployment",
+  "inference_note": "Uses placeholder weights - implement actual inference bridge for full functionality"
+}

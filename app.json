@@ -12,6 +12,10 @@
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
+    "assetBundlePatterns": [
+      "**/*",
+      "assets/models/**/*"
+    ],
     "plugins": [
       [
         "expo-camera",
@@ -31,6 +35,13 @@
           "locationAlwaysAndWhenInUsePermission": "Allow LocalTravelBuddy to access your location for offline navigation.",
           "locationAlwaysPermission": "Allow LocalTravelBuddy to access your location for offline navigation.",
           "locationWhenInUsePermission": "Allow LocalTravelBuddy to access your location for offline navigation."
+        }
+      ],
+      [
+        "expo-file-system",
+        {
+          "readPermission": "Allow LocalTravelBuddy to read AI model files for offline operation.",
+          "writePermission": "Allow LocalTravelBuddy to cache AI model data for offline operation."
         }
       ]
     ],
@@ -54,7 +65,9 @@
         "android.permission.RECORD_AUDIO",
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_BACKGROUND_LOCATION"
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
       ]
     },
     "web": {
