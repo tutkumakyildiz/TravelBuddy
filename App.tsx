@@ -30,12 +30,12 @@ export default function App() {
       
       if (initialized) {
         setAiInitialized(true);
-        Alert.alert('AI Ready', 'Quantized Gemma 3n is ready for offline use!');
+        Alert.alert('AI Ready', 'Hugging Face Gemma 3n model is ready for offline use!');
       } else {
         setAiInitialized(false);
         Alert.alert(
           'AI Not Ready', 
-          'Quantized Gemma 3n model not found. The app will automatically set up the model files for offline use.'
+          'Hugging Face Gemma 3n model not found. The app will automatically download the model for offline use.'
         );
       }
     } catch (error) {
@@ -49,7 +49,7 @@ export default function App() {
 
   const handleMicrophonePress = async () => {
     if (!aiInitialized) {
-      Alert.alert('AI Not Ready', 'Please ensure Quantized Gemma 3n model is properly installed.');
+      Alert.alert('AI Not Ready', 'Please ensure Hugging Face Gemma 3n model is properly downloaded.');
       return;
     }
 
@@ -162,7 +162,7 @@ export default function App() {
 
   const handleCameraPress = async () => {
     if (!aiInitialized) {
-      Alert.alert('AI Not Ready', 'Please ensure Quantized Gemma 3n model is properly installed.');
+      Alert.alert('AI Not Ready', 'Please ensure Hugging Face Gemma 3n model is properly downloaded.');
       return;
     }
 
@@ -181,7 +181,7 @@ export default function App() {
 
   const handleMapPress = async () => {
     if (!aiInitialized) {
-      Alert.alert('AI Not Ready', 'Please ensure Quantized Gemma 3n model is properly installed.');
+      Alert.alert('AI Not Ready', 'Please ensure Hugging Face Gemma 3n model is properly downloaded.');
       return;
     }
 
