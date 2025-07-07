@@ -94,6 +94,16 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0.0"
+        
+        // Enable large heap for AI model processing
+        manifestPlaceholders = [
+            "android:largeHeap": "true"
+        ]
+        
+        // Optimize for arm64-v8a architecture (required for llama.rn)
+        ndk {
+            abiFilters "arm64-v8a"
+        }
     }
     signingConfigs {
         debug {

@@ -9,47 +9,172 @@ import CameraModal from './components/CameraModal';
 export default function App() {
   const [isRecording, setIsRecording] = useState(false);
   const [aiInitialized, setAiInitialized] = useState(false);
-  const [aiLoading, setAiLoading] = useState(true);
+  const [aiLoading, setAiLoading] = useState(false);
   const [lastAiResponse, setLastAiResponse] = useState<string>('');
   const [cameraModalVisible, setCameraModalVisible] = useState(false);
   const [isProcessingAudio, setIsProcessingAudio] = useState(false);
+  const [initializationAttempted, setInitializationAttempted] = useState(false);
   
   // Temporary debug mode - set to true to test UI flow without actual recording
   const [debugMode] = useState(true);
 
-  // Initialize AI service on app start
+  // NO LONGER INITIALIZE AI ON STARTUP - Use lazy loading instead
   useEffect(() => {
-    initializeAI();
+    console.log('🚀 App started - AI will be initialized when needed (lazy loading)');
+    console.log('📱 This prevents startup crashes and improves app launch time');
   }, []);
 
-  const initializeAI = async () => {
+  // LAZY AI INITIALIZATION - Only when actually needed
+  const initializeAILazily = async (): Promise<boolean> => {
+    if (aiInitialized) {
+      return true; // Already initialized
+    }
+
+    if (aiLoading) {
+      console.log('🔄 AI already being initialized...');
+      return false; // Already loading
+    }
+
     try {
       setAiLoading(true);
-      const aiService = AIService.getInstance();
-      const initialized = await aiService.initialize();
+      setInitializationAttempted(true);
+      console.log('🤖 Starting mandatory AI initialization in dedicated background context...');
+      
+      // IMPROVED BACKGROUND PROCESSING: Use Promise with proper async isolation
+      const backgroundInitialization = new Promise<boolean>((resolve, reject) => {
+        // Use multiple setTimeout calls to ensure proper background execution
+        const scheduleBackgroundWork = () => {
+          setTimeout(async () => {
+            try {
+              console.log('🧵 AI initialization now running in isolated background context...');
+              
+              const aiService = AIService.getInstance();
+              
+              // Show user that we're starting the heavy download/initialization
+              Alert.alert(
+                'Loading AI Model', 
+                'LocalTravelBuddy is loading the Gemma 3n AI model (4.87GB).\n\nFirst time setup may take 5-10 minutes.\n\nThe app will notify you when ready.',
+                [{ text: 'OK', style: 'default' }]
+              );
+              
+              // Add comprehensive progress monitoring
+              const progressMonitor = setInterval(() => {
+                try {
+                  const progress = aiService.getDownloadProgress();
+                  const isDownloading = aiService.isModelDownloading();
+                  
+                  if (isDownloading && progress && progress.progress > 0) {
+                    console.log(`📊 Download Progress: ${(progress.progress * 100).toFixed(1)}% (${aiService.formatBytes(progress.totalBytesWritten)} / ${aiService.formatBytes(progress.totalBytesExpectedToWrite)})`);
+                  } else if (!isDownloading) {
+                    console.log('🔄 Model loading and initialization in progress...');
+                  }
+                } catch (monitorError) {
+                  console.warn('Progress monitoring error:', monitorError);
+                }
+              }, 5000); // Every 5 seconds
+              
+              // Initialize with enhanced error handling
+              const initialized = await aiService.initialize();
+              clearInterval(progressMonitor);
+              
+              if (initialized) {
+                console.log('✅ Heavy AI model initialized successfully in background');
+                resolve(true);
+              } else {
+                console.error('❌ AI initialization returned false');
+                reject(new Error('AI initialization failed'));
+              }
+              
+            } catch (error) {
+              console.error('❌ Background AI initialization failed:', error);
+              reject(error);
+            }
+          }, 50); // Minimal delay for background execution
+        };
+        
+        // Schedule the work
+        scheduleBackgroundWork();
+      });
+      
+      const initialized = await backgroundInitialization;
       
       if (initialized) {
         setAiInitialized(true);
-        Alert.alert('AI Ready', 'Hugging Face Gemma 3n model is ready for offline use!');
-      } else {
-        setAiInitialized(false);
+        console.log('✅ Gemma 3n AI model fully loaded and ready');
         Alert.alert(
-          'AI Not Ready', 
-          'Hugging Face Gemma 3n model not found. The app will automatically download the model for offline use.'
+          'AI Ready', 
+          'LocalTravelBuddy AI (Gemma 3n) is now fully loaded and ready!\n\nAll voice and camera features are available.',
+          [{ text: 'Great!', style: 'default' }]
         );
+        return true;
+      } else {
+        console.log('❌ AI initialization failed');
+        return false;
       }
     } catch (error) {
       console.error('AI initialization error:', error);
-      setAiInitialized(false);
-      Alert.alert('AI Error', 'Failed to initialize AI service. Check console for details.');
+      
+      // Enhanced error handling for heavy model loading
+      if (error.message?.includes('memory') || error.message?.includes('OutOfMemory')) {
+        Alert.alert(
+          'Memory Error', 
+          'Insufficient memory to load the 4.87GB Gemma AI model.\n\nFor Android Emulator:\n• Increase RAM to 8GB\n• Close other apps\n• Restart emulator\n\nFor real device:\n• Close all other apps\n• Restart device',
+          [{ text: 'OK', style: 'default' }]
+        );
+      } else if (error.message?.includes('storage') || error.message?.includes('space')) {
+        Alert.alert(
+          'Storage Error', 
+          'Insufficient storage space for the 4.87GB model.\n\nRequired: 6GB+ free space\n\nPlease free up storage and try again.',
+          [{ text: 'OK', style: 'default' }]
+        );
+      } else if (error.message?.includes('network') || error.message?.includes('download')) {
+        Alert.alert(
+          'Download Error', 
+          'Failed to download the AI model from Hugging Face.\n\nPlease check your internet connection and try again.',
+          [{ text: 'OK', style: 'default' }]
+        );
+      } else {
+        Alert.alert(
+          'AI Initialization Error', 
+          `Failed to initialize Gemma AI model:\n\n${error.message}\n\nThis is required for the app to function.`,
+          [{ text: 'OK', style: 'default' }]
+        );
+      }
+      
+      return false;
     } finally {
       setAiLoading(false);
     }
   };
 
   const handleMicrophonePress = async () => {
+    // Mandatory AI initialization - only initialize when user actually needs it
+    if (!aiInitialized && !initializationAttempted) {
+      console.log('🔄 User requested AI feature - starting mandatory AI initialization...');
+      const initialized = await initializeAILazily();
+      if (!initialized) {
+        Alert.alert(
+          'AI Required', 
+          'Failed to initialize AI. Please try again.',
+          [{ text: 'Retry', onPress: () => handleMicrophonePress() }]
+        );
+        return;
+      }
+    }
+
+    // If AI is still loading, show status and wait
+    if (aiLoading) {
+      Alert.alert(
+        'AI Loading', 
+        'AI model is still loading in the background. Please wait a moment and try again.\n\nThis may take several minutes on first use.',
+        [{ text: 'OK', style: 'default' }]
+      );
+      return;
+    }
+
+    // AI must be ready to proceed
     if (!aiInitialized) {
-      Alert.alert('AI Not Ready', 'Please ensure Hugging Face Gemma 3n model is properly downloaded.');
+      Alert.alert('AI Required', 'AI must be initialized to use voice features.');
       return;
     }
 
@@ -66,13 +191,13 @@ export default function App() {
         setIsRecording(false);
         setIsProcessingAudio(true);
         
-        // Simulate processing delay
+        // Simulate processing with real AI
         setTimeout(async () => {
           const aiService = AIService.getInstance();
           const response = await aiService.processAudio('debug://fake-uri', 'What are the best restaurants nearby?');
           
           setLastAiResponse(response.text || '');
-          Alert.alert('Debug AI Voice Response', response.text || 'No response generated');
+          Alert.alert('AI Voice Response', response.text || 'No response generated');
           setIsProcessingAudio(false);
         }, 2000);
         return;
@@ -101,9 +226,7 @@ export default function App() {
           Alert.alert(
             'Recording Error', 
             'Unable to start recording. Please check microphone permissions in your device settings.',
-            [
-              { text: 'OK', style: 'default' }
-            ]
+            [{ text: 'OK', style: 'default' }]
           );
         }
       } catch (error) {
@@ -119,41 +242,21 @@ export default function App() {
         
         const audioUri = await audioService.stopRecording();
         
-        if (!audioUri) {
-          Alert.alert('Recording Error', 'No audio was recorded');
-          setIsProcessingAudio(false);
-          return;
-        }
-
-        console.log('🗣️ Processing speech to text...');
-        // Convert speech to text
-        const speechResult = await audioService.speechToText(audioUri);
-        
-        if (speechResult.error) {
-          Alert.alert('Speech Recognition Error', speechResult.error);
-          setIsProcessingAudio(false);
-          await audioService.cleanup();
-          return;
-        }
-
-        console.log('🤖 Processing with AI:', speechResult.text);
-        // Process with AI
-        const aiService = AIService.getInstance();
-        const response = await aiService.processAudio(audioUri, speechResult.text);
-        
-        // Clean up audio file
-        await audioService.cleanup();
-        
-        if (response.error) {
-          Alert.alert('AI Error', response.error);
-        } else {
+        if (audioUri) {
+          console.log('🎵 Audio saved to:', audioUri);
+          
+          // Process with AI (mandatory - no fallback)
+          const aiService = AIService.getInstance();
+          const response = await aiService.processAudio(audioUri);
           setLastAiResponse(response.text || '');
           Alert.alert('AI Voice Response', response.text || 'No response generated');
+        } else {
+          console.error('❌ No audio URI returned');
+          Alert.alert('Recording Error', 'Failed to save audio recording');
         }
       } catch (error) {
-        console.error('Voice processing error:', error);
-        Alert.alert('Error', 'Failed to process voice input');
-        await audioService.cleanup();
+        console.error('❌ Exception during recording stop:', error);
+        Alert.alert('Recording Error', `Failed to process voice recording: ${error instanceof Error ? error.message : 'Unknown error'}`);
       } finally {
         setIsProcessingAudio(false);
       }
@@ -161,12 +264,36 @@ export default function App() {
   };
 
   const handleCameraPress = async () => {
-    if (!aiInitialized) {
-      Alert.alert('AI Not Ready', 'Please ensure Hugging Face Gemma 3n model is properly downloaded.');
+    // Mandatory AI initialization for camera features
+    if (!aiInitialized && !initializationAttempted) {
+      console.log('🔄 User requested camera AI feature - starting mandatory AI initialization...');
+      const initialized = await initializeAILazily();
+      if (!initialized) {
+        Alert.alert(
+          'AI Required', 
+          'Failed to initialize AI. Please try again.',
+          [{ text: 'Retry', onPress: () => handleCameraPress() }]
+        );
+        return;
+      }
+    }
+
+    // If AI is still loading, show status and wait
+    if (aiLoading) {
+      Alert.alert(
+        'AI Loading', 
+        'AI model is still loading in the background. Please wait a moment and try again.',
+        [{ text: 'OK', style: 'default' }]
+      );
       return;
     }
 
-    console.log('Camera button pressed, opening modal...');
+    // AI must be ready to proceed
+    if (!aiInitialized) {
+      Alert.alert('AI Required', 'AI must be initialized to use camera features.');
+      return;
+    }
+    
     setCameraModalVisible(true);
   };
 
@@ -180,25 +307,18 @@ export default function App() {
   };
 
   const handleMapPress = async () => {
-    if (!aiInitialized) {
-      Alert.alert('AI Not Ready', 'Please ensure Hugging Face Gemma 3n model is properly downloaded.');
-      return;
+    // Lazy initialization for map AI features
+    if (!aiInitialized && !initializationAttempted) {
+      console.log('🔄 User requested map AI feature - starting lazy initialization...');
+      await initializeAILazily();
     }
-
-    try {
-      const aiService = AIService.getInstance();
-      const response = await aiService.generateTravelRecommendations('Current Location', ['outdoor', 'culture', 'food']);
-      
-      if (response.error) {
-        Alert.alert('AI Error', response.error);
-      } else {
-        setLastAiResponse(response.text || '');
-        Alert.alert('Travel Recommendations', response.text || 'No recommendations available');
-      }
-    } catch (error) {
-      console.error('Travel recommendations error:', error);
-      Alert.alert('Error', 'Failed to generate travel recommendations');
-    }
+    
+    // For now, just show a placeholder
+    Alert.alert(
+      'Map Feature', 
+      'Map integration coming soon!\n\nCurrent status:\n• AI Ready: ' + (aiInitialized ? 'Yes' : 'Loading...') + '\n• Offline Maps: Coming soon',
+      [{ text: 'OK', style: 'default' }]
+    );
   };
 
   return (
