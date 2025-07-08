@@ -4,6 +4,9 @@ import { StyleSheet, View, TouchableOpacity, Alert, Text, ActivityIndicator } fr
 import { Ionicons } from '@expo/vector-icons';
 import AIService from './services/AIService';
 import CameraModal from './components/CameraModal';
+import MapComponent from './components/MapComponent';
+import DraggableLocation from './components/DraggableLocation';
+import LocationService, { LocationData } from './services/LocationService';
 
 export default function App() {
   const [aiInitialized, setAiInitialized] = useState(false);
@@ -13,18 +16,67 @@ export default function App() {
   const [isProcessingLocation, setIsProcessingLocation] = useState(false);
   const [initializationAttempted, setInitializationAttempted] = useState(false);
   
-  // Mock coordinates for demo (can be replaced with actual location service)
-  const [currentLocation] = useState({
-    latitude: 37.7749,
-    longitude: -122.4194,
-    placeName: 'San Francisco, CA'
-  });
+  // Real location data using LocationService
+  const [currentLocation, setCurrentLocation] = useState<LocationData | null>(null);
+  const [locationLoading, setLocationLoading] = useState(true);
+  const [locationError, setLocationError] = useState<string | null>(null);
+  
+  const locationService = LocationService.getInstance();
 
-  // NO LONGER INITIALIZE AI ON STARTUP - Use lazy loading instead
+  // Initialize location service and get current location
   useEffect(() => {
     console.log('🚀 App started - AI will be initialized when needed (lazy loading)');
     console.log('📱 This prevents startup crashes and improves app launch time');
+    
+    // Initialize location service
+    initializeLocationService();
+    
+    // Cleanup function to stop location watch
+    return () => {
+      locationService.stopLocationWatch();
+    };
   }, []);
+
+  const initializeLocationService = async () => {
+    try {
+      setLocationLoading(true);
+      setLocationError(null);
+      
+      console.log('📍 Initializing location service...');
+      
+      // Initialize location service with permissions
+      const initialized = await locationService.initialize();
+      
+      if (initialized) {
+        console.log('✅ Location service initialized successfully');
+        
+        // Get current location
+        const location = await locationService.getCurrentLocation();
+        
+        if (location) {
+          setCurrentLocation(location);
+          console.log('📍 Current location:', location.placeName);
+          
+          // Start watching location changes
+          await locationService.startLocationWatch((newLocation) => {
+            setCurrentLocation(newLocation);
+            console.log('📍 Location updated:', newLocation.placeName);
+          });
+        } else {
+          console.log('❌ Failed to get current location');
+          setLocationError('Failed to get current location');
+        }
+      } else {
+        console.log('❌ Location service initialization failed');
+        setLocationError('Location permissions denied or services disabled');
+      }
+    } catch (error) {
+      console.error('❌ Location service error:', error);
+      setLocationError(`Location error: ${error.message}`);
+    } finally {
+      setLocationLoading(false);
+    }
+  };
 
   // LAZY AI INITIALIZATION - Only when actually needed
   const initializeAILazily = async (): Promise<boolean> => {
@@ -249,72 +301,180 @@ export default function App() {
     }
   };
 
+  const handlePlaceSymbolDrop = async (coordinates: { x: number; y: number }) => {
+    console.log('🎯 Place symbol dropped at screen coordinates:', coordinates);
+    
+    // Show immediate feedback
+    Alert.alert(
+      'AI Processing Location',
+      'Analyzing the location where you dropped the symbol...',
+      [{ text: 'OK', style: 'default' }]
+    );
+
+    // Lazy initialization for AI features
+    if (!aiInitialized && !initializationAttempted) {
+      console.log('🔄 User requested AI feature - starting lazy initialization...');
+      const initialized = await initializeAILazily();
+      if (!initialized) {
+        Alert.alert(
+          'AI Required', 
+          'Failed to initialize AI. Please try again.',
+          [{ text: 'Retry', onPress: () => handlePlaceSymbolDrop(coordinates) }]
+        );
+        return;
+      }
+    }
+
+    // If AI is still loading, show status and wait
+    if (aiLoading) {
+      Alert.alert(
+        'AI Loading', 
+        'AI model is still loading in the background. Please wait a moment and try again.',
+        [{ text: 'OK', style: 'default' }]
+      );
+      return;
+    }
+
+    // AI must be ready to proceed
+    if (!aiInitialized) {
+      Alert.alert('AI Required', 'AI must be initialized to use location features.');
+      return;
+    }
+
+    try {
+      setIsProcessingLocation(true);
+      console.log('🗺️ Processing dropped location query...');
+      
+      const aiService = AIService.getInstance();
+      
+      // For MVP, use current location as the base and assume user is exploring nearby
+      // In a full version, we'd convert screen coordinates to map coordinates
+      const response = await aiService.processLocationQuery(
+        currentLocation?.latitude || 52.3676, // Default to Amsterdam if no location
+        currentLocation?.longitude || 4.9041,
+        currentLocation?.placeName || 'Unknown location'
+      );
+      
+      setLastAiResponse(response.text || '');
+      
+      if (response.error) {
+        Alert.alert('Error', response.error);
+      } else {
+        Alert.alert(
+          'Location Exploration',
+          `🎯 AI Analysis:\n\n${response.text || 'No information available'}`,
+          [{ text: 'Great!', style: 'default' }]
+        );
+      }
+    } catch (error) {
+      console.error('Error processing dropped location:', error);
+      Alert.alert('Error', 'Failed to process location query. Please try again.');
+    } finally {
+      setIsProcessingLocation(false);
+    }
+  };
+
   return (
     <View style={styles.container}>
-      {/* Map Placeholder - Main area */}
-      <TouchableOpacity style={styles.mapContainer} onPress={handleMapPress} activeOpacity={0.8}>
-        <View style={styles.mapPlaceholder}>
-          <View style={styles.mapGrid}>
-            {/* Grid lines to simulate map appearance */}
-            {Array.from({ length: 10 }, (_, i) => (
-              <View key={`h-${i}`} style={[styles.gridLine, styles.horizontalLine, { top: `${i * 10}%` }]} />
-            ))}
-            {Array.from({ length: 10 }, (_, i) => (
-              <View key={`v-${i}`} style={[styles.gridLine, styles.verticalLine, { left: `${i * 10}%` }]} />
-            ))}
-          </View>
-          
-          {/* Location marker */}
-          <View style={styles.locationMarker}>
-            <Ionicons name="location" size={24} color="#ff4444" />
-          </View>
-          
-          {/* Map info overlay */}
-          <View style={styles.mapInfo}>
-            <Text style={styles.mapInfoText}>📍 {currentLocation.placeName}</Text>
-            <Text style={styles.mapInfoSubtext}>LocalTravelBuddy MVP</Text>
-            <Text style={styles.mapInfoSubtext}>Tap for AI information</Text>
-          </View>
-
-          {/* AI Status indicator */}
-          <View style={styles.aiStatus}>
-            {aiLoading ? (
-              <View style={styles.aiStatusContent}>
-                <ActivityIndicator size="small" color="#666" />
-                <Text style={styles.aiStatusText}>Loading AI...</Text>
-              </View>
-            ) : (
-              <View style={styles.aiStatusContent}>
-                <View style={[styles.aiStatusDot, { backgroundColor: aiInitialized ? '#4CAF50' : '#F44336' }]} />
-                <Text style={styles.aiStatusText}>
-                  AI {aiInitialized ? 'Ready' : 'Not Ready'}
-                </Text>
-              </View>
-            )}
-          </View>
-
-          {/* Last AI Response Display */}
-          {lastAiResponse && !isProcessingLocation && (
-            <View style={styles.responseOverlay}>
-              <Text style={styles.responseText} numberOfLines={3}>
-                🤖 {lastAiResponse}
+      {/* Real MapLibre Map */}
+      <View style={styles.mapContainer}>
+        <MapComponent 
+          style={styles.map}
+          currentLocation={currentLocation}
+          onMapPress={(coordinates) => {
+            console.log('🗺️ Map pressed at:', coordinates);
+            handleMapPress();
+          }}
+        />
+        
+        {/* Location Status indicator overlay */}
+        <View style={styles.locationStatusOverlay}>
+          {locationLoading ? (
+            <View style={styles.locationStatusContent}>
+              <ActivityIndicator size="small" color="#666" />
+              <Text style={styles.locationStatusText}>Getting location...</Text>
+            </View>
+          ) : locationError ? (
+            <View style={styles.locationStatusContent}>
+              <View style={[styles.locationStatusDot, { backgroundColor: '#F44336' }]} />
+              <Text style={styles.locationStatusText}>Location Error</Text>
+            </View>
+          ) : currentLocation ? (
+            <View style={styles.locationStatusContent}>
+              <View style={[styles.locationStatusDot, { backgroundColor: '#4CAF50' }]} />
+              <Text style={styles.locationStatusText}>
+                {currentLocation.placeName}
               </Text>
             </View>
-          )}
-
-          {/* Processing Status Display */}
-          {isProcessingLocation && (
-            <View style={styles.processingOverlay}>
-              <ActivityIndicator size="large" color="#007AFF" />
-              <Text style={styles.processingText}>🗺️ Processing location...</Text>
-              <Text style={styles.processingSubtext}>Getting travel information</Text>
+          ) : (
+            <View style={styles.locationStatusContent}>
+              <View style={[styles.locationStatusDot, { backgroundColor: '#FF9800' }]} />
+              <Text style={styles.locationStatusText}>Location Unknown</Text>
             </View>
           )}
         </View>
-      </TouchableOpacity>
 
-      {/* Control Panel - Bottom overlay with camera only */}
+        {/* AI Status indicator overlay */}
+        <View style={styles.aiStatusOverlay}>
+          {aiLoading ? (
+            <View style={styles.aiStatusContent}>
+              <ActivityIndicator size="small" color="#666" />
+              <Text style={styles.aiStatusText}>Loading AI...</Text>
+            </View>
+          ) : (
+            <View style={styles.aiStatusContent}>
+              <View style={[styles.aiStatusDot, { backgroundColor: aiInitialized ? '#4CAF50' : '#F44336' }]} />
+              <Text style={styles.aiStatusText}>
+                AI {aiInitialized ? 'Ready' : 'Not Ready'}
+              </Text>
+            </View>
+          )}
+        </View>
+
+        {/* Last AI Response Display */}
+        {lastAiResponse && !isProcessingLocation && (
+          <View style={styles.responseOverlay}>
+            <Text style={styles.responseText} numberOfLines={3}>
+              🤖 {lastAiResponse}
+            </Text>
+          </View>
+        )}
+
+        {/* Processing Status Display */}
+        {isProcessingLocation && (
+          <View style={styles.processingOverlay}>
+            <ActivityIndicator size="large" color="#007AFF" />
+            <Text style={styles.processingText}>🗺️ Processing location...</Text>
+            <Text style={styles.processingSubtext}>Getting travel information</Text>
+          </View>
+        )}
+
+        {/* Draggable Place Symbol */}
+        <DraggableLocation onDrop={handlePlaceSymbolDrop} />
+      </View>
+
+      {/* Control Panel - Bottom overlay with camera and location controls */}
       <View style={styles.controlPanel}>
+        {/* Location Refresh Button */}
+        <TouchableOpacity 
+          style={[
+            styles.controlButton,
+            styles.locationButton,
+            locationLoading && styles.disabledButton
+          ]} 
+          onPress={async () => {
+            console.log('📍 Manual location refresh requested');
+            await locationService.getCurrentLocation(true); // Force refresh
+          }}
+          disabled={locationLoading}
+        >
+          <Ionicons 
+            name="location-outline" 
+            size={32} 
+            color={locationLoading ? "#666" : "#ffffff"} 
+          />
+        </TouchableOpacity>
+        
         {/* Camera Button */}
         <TouchableOpacity 
           style={[
@@ -350,6 +510,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
   },
   mapContainer: {
+    flex: 1,
+  },
+  map: {
     flex: 1,
   },
   mapPlaceholder: {
@@ -428,6 +591,47 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
     elevation: 3,
   },
+  locationStatusOverlay: {
+    position: 'absolute',
+    top: 60,
+    left: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    padding: 8,
+    borderRadius: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 3,
+  },
+  locationStatusContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  locationStatusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 6,
+  },
+  locationStatusText: {
+    fontSize: 11,
+    color: '#666',
+    fontWeight: '500',
+  },
+  aiStatusOverlay: {
+    position: 'absolute',
+    top: 60,
+    right: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    padding: 8,
+    borderRadius: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 3,
+  },
   aiStatusContent: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -475,6 +679,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 2,
     borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  locationButton: {
+    backgroundColor: 'rgba(255, 152, 0, 0.7)',
+    marginRight: 20,
   },
   disabledButton: {
     backgroundColor: 'rgba(0, 0, 0, 0.3)',
