@@ -3,20 +3,22 @@ import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, View, TouchableOpacity, Alert, Text, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AIService from './services/AIService';
-import AudioService from './services/AudioService';
 import CameraModal from './components/CameraModal';
 
 export default function App() {
-  const [isRecording, setIsRecording] = useState(false);
   const [aiInitialized, setAiInitialized] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [lastAiResponse, setLastAiResponse] = useState<string>('');
   const [cameraModalVisible, setCameraModalVisible] = useState(false);
-  const [isProcessingAudio, setIsProcessingAudio] = useState(false);
+  const [isProcessingLocation, setIsProcessingLocation] = useState(false);
   const [initializationAttempted, setInitializationAttempted] = useState(false);
   
-  // Temporary debug mode - set to true to test UI flow without actual recording
-  const [debugMode] = useState(true);
+  // Mock coordinates for demo (can be replaced with actual location service)
+  const [currentLocation] = useState({
+    latitude: 37.7749,
+    longitude: -122.4194,
+    placeName: 'San Francisco, CA'
+  });
 
   // NO LONGER INITIALIZE AI ON STARTUP - Use lazy loading instead
   useEffect(() => {
@@ -53,7 +55,7 @@ export default function App() {
               // Show user that we're starting the heavy download/initialization
               Alert.alert(
                 'Loading AI Model', 
-                'LocalTravelBuddy is loading the Gemma 3n AI model (4.87GB).\n\nFirst time setup may take 5-10 minutes.\n\nThe app will notify you when ready.',
+                'LocalTravelBuddy is loading the Gemma 3n AI model (2.9GB).\n\nFirst time setup may take 5-10 minutes.\n\nThe app will notify you when ready.',
                 [{ text: 'OK', style: 'default' }]
               );
               
@@ -103,7 +105,7 @@ export default function App() {
         console.log('✅ Gemma 3n AI model fully loaded and ready');
         Alert.alert(
           'AI Ready', 
-          'LocalTravelBuddy AI (Gemma 3n) is now fully loaded and ready!\n\nAll voice and camera features are available.',
+          'LocalTravelBuddy AI (Gemma 3n) is now fully loaded and ready!\n\nAll location features are available.',
           [{ text: 'Great!', style: 'default' }]
         );
         return true;
@@ -118,13 +120,13 @@ export default function App() {
       if (error.message?.includes('memory') || error.message?.includes('OutOfMemory')) {
         Alert.alert(
           'Memory Error', 
-          'Insufficient memory to load the 4.87GB Gemma AI model.\n\nFor Android Emulator:\n• Increase RAM to 8GB\n• Close other apps\n• Restart emulator\n\nFor real device:\n• Close all other apps\n• Restart device',
+          'Insufficient memory to load the 2.9GB Gemma AI model.\n\nFor Android Emulator:\n• Increase RAM to 8GB\n• Close other apps\n• Restart emulator\n\nFor real device:\n• Close all other apps\n• Restart device',
           [{ text: 'OK', style: 'default' }]
         );
       } else if (error.message?.includes('storage') || error.message?.includes('space')) {
         Alert.alert(
           'Storage Error', 
-          'Insufficient storage space for the 4.87GB model.\n\nRequired: 6GB+ free space\n\nPlease free up storage and try again.',
+          'Insufficient storage space for the 2.9GB model.\n\nRequired: 4GB+ free space\n\nPlease free up storage and try again.',
           [{ text: 'OK', style: 'default' }]
         );
       } else if (error.message?.includes('network') || error.message?.includes('download')) {
@@ -144,122 +146,6 @@ export default function App() {
       return false;
     } finally {
       setAiLoading(false);
-    }
-  };
-
-  const handleMicrophonePress = async () => {
-    // Mandatory AI initialization - only initialize when user actually needs it
-    if (!aiInitialized && !initializationAttempted) {
-      console.log('🔄 User requested AI feature - starting mandatory AI initialization...');
-      const initialized = await initializeAILazily();
-      if (!initialized) {
-        Alert.alert(
-          'AI Required', 
-          'Failed to initialize AI. Please try again.',
-          [{ text: 'Retry', onPress: () => handleMicrophonePress() }]
-        );
-        return;
-      }
-    }
-
-    // If AI is still loading, show status and wait
-    if (aiLoading) {
-      Alert.alert(
-        'AI Loading', 
-        'AI model is still loading in the background. Please wait a moment and try again.\n\nThis may take several minutes on first use.',
-        [{ text: 'OK', style: 'default' }]
-      );
-      return;
-    }
-
-    // AI must be ready to proceed
-    if (!aiInitialized) {
-      Alert.alert('AI Required', 'AI must be initialized to use voice features.');
-      return;
-    }
-
-    const audioService = AudioService.getInstance();
-
-    // Debug mode for testing UI flow
-    if (debugMode) {
-      if (!isRecording) {
-        console.log('🐛 DEBUG: Simulating recording start');
-        setIsRecording(true);
-        return;
-      } else {
-        console.log('🐛 DEBUG: Simulating recording stop and processing');
-        setIsRecording(false);
-        setIsProcessingAudio(true);
-        
-        // Simulate processing with real AI
-        setTimeout(async () => {
-          const aiService = AIService.getInstance();
-          const response = await aiService.processAudio('debug://fake-uri', 'What are the best restaurants nearby?');
-          
-          setLastAiResponse(response.text || '');
-          Alert.alert('AI Voice Response', response.text || 'No response generated');
-          setIsProcessingAudio(false);
-        }, 2000);
-        return;
-      }
-    }
-
-    if (!isRecording) {
-      // Start recording
-      try {
-        console.log('🎤 Starting voice recording...');
-        const recordingStarted = await audioService.startRecording();
-        
-        if (recordingStarted) {
-          setIsRecording(true);
-          console.log('🔴 Recording started successfully - UI state updated');
-          
-          // Auto-stop recording after 30 seconds to prevent hanging
-          setTimeout(async () => {
-            if (audioService.getRecordingStatus().isRecording) {
-              console.log('⏰ Auto-stopping recording after 30 seconds');
-              handleMicrophonePress(); // This will trigger the stop logic
-            }
-          }, 30000);
-        } else {
-          console.error('❌ Recording failed to start');
-          Alert.alert(
-            'Recording Error', 
-            'Unable to start recording. Please check microphone permissions in your device settings.',
-            [{ text: 'OK', style: 'default' }]
-          );
-        }
-      } catch (error) {
-        console.error('❌ Exception during recording start:', error);
-        Alert.alert('Recording Error', `Failed to start voice recording: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      }
-    } else {
-      // Stop recording and process
-      try {
-        console.log('⏹️ Stopping voice recording...');
-        setIsRecording(false);
-        setIsProcessingAudio(true);
-        
-        const audioUri = await audioService.stopRecording();
-        
-        if (audioUri) {
-          console.log('🎵 Audio saved to:', audioUri);
-          
-          // Process with AI (mandatory - no fallback)
-          const aiService = AIService.getInstance();
-          const response = await aiService.processAudio(audioUri);
-          setLastAiResponse(response.text || '');
-          Alert.alert('AI Voice Response', response.text || 'No response generated');
-        } else {
-          console.error('❌ No audio URI returned');
-          Alert.alert('Recording Error', 'Failed to save audio recording');
-        }
-      } catch (error) {
-        console.error('❌ Exception during recording stop:', error);
-        Alert.alert('Recording Error', `Failed to process voice recording: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      } finally {
-        setIsProcessingAudio(false);
-      }
     }
   };
 
@@ -310,15 +196,57 @@ export default function App() {
     // Lazy initialization for map AI features
     if (!aiInitialized && !initializationAttempted) {
       console.log('🔄 User requested map AI feature - starting lazy initialization...');
-      await initializeAILazily();
+      const initialized = await initializeAILazily();
+      if (!initialized) {
+        Alert.alert(
+          'AI Required', 
+          'Failed to initialize AI. Please try again.',
+          [{ text: 'Retry', onPress: () => handleMapPress() }]
+        );
+        return;
+      }
     }
-    
-    // For now, just show a placeholder
-    Alert.alert(
-      'Map Feature', 
-      'Map integration coming soon!\n\nCurrent status:\n• AI Ready: ' + (aiInitialized ? 'Yes' : 'Loading...') + '\n• Offline Maps: Coming soon',
-      [{ text: 'OK', style: 'default' }]
-    );
+
+    // If AI is still loading, show status and wait
+    if (aiLoading) {
+      Alert.alert(
+        'AI Loading', 
+        'AI model is still loading in the background. Please wait a moment and try again.',
+        [{ text: 'OK', style: 'default' }]
+      );
+      return;
+    }
+
+    // AI must be ready to proceed
+    if (!aiInitialized) {
+      Alert.alert('AI Required', 'AI must be initialized to use location features.');
+      return;
+    }
+
+    try {
+      setIsProcessingLocation(true);
+      console.log('🗺️ Processing location query...');
+      
+      const aiService = AIService.getInstance();
+      const response = await aiService.processLocationQuery(
+        currentLocation.latitude,
+        currentLocation.longitude,
+        currentLocation.placeName
+      );
+      
+      setLastAiResponse(response.text || '');
+      
+      if (response.error) {
+        Alert.alert('Error', response.error);
+      } else {
+        Alert.alert('Location Information', response.text || 'No information available');
+      }
+    } catch (error) {
+      console.error('Error processing location:', error);
+      Alert.alert('Error', 'Failed to process location query. Please try again.');
+    } finally {
+      setIsProcessingLocation(false);
+    }
   };
 
   return (
@@ -343,9 +271,9 @@ export default function App() {
           
           {/* Map info overlay */}
           <View style={styles.mapInfo}>
-            <Text style={styles.mapInfoText}>📍 Current Location</Text>
+            <Text style={styles.mapInfoText}>📍 {currentLocation.placeName}</Text>
             <Text style={styles.mapInfoSubtext}>LocalTravelBuddy MVP</Text>
-            <Text style={styles.mapInfoSubtext}>Tap for AI recommendations</Text>
+            <Text style={styles.mapInfoSubtext}>Tap for AI information</Text>
           </View>
 
           {/* AI Status indicator */}
@@ -366,7 +294,7 @@ export default function App() {
           </View>
 
           {/* Last AI Response Display */}
-          {lastAiResponse && !isRecording && !isProcessingAudio && (
+          {lastAiResponse && !isProcessingLocation && (
             <View style={styles.responseOverlay}>
               <Text style={styles.responseText} numberOfLines={3}>
                 🤖 {lastAiResponse}
@@ -374,52 +302,19 @@ export default function App() {
             </View>
           )}
 
-          {/* Recording Status Display */}
-          {isRecording && (
-            <View style={styles.recordingOverlay}>
-              <View style={styles.recordingIndicator}>
-                <View style={styles.recordingDot} />
-                <Text style={styles.recordingText}>🎤 Listening...</Text>
-              </View>
-              <Text style={styles.recordingSubtext}>Tap microphone to stop</Text>
-            </View>
-          )}
-
           {/* Processing Status Display */}
-          {isProcessingAudio && (
+          {isProcessingLocation && (
             <View style={styles.processingOverlay}>
               <ActivityIndicator size="large" color="#007AFF" />
-              <Text style={styles.processingText}>🗣️ Processing speech...</Text>
-              <Text style={styles.processingSubtext}>Converting voice to text</Text>
+              <Text style={styles.processingText}>🗺️ Processing location...</Text>
+              <Text style={styles.processingSubtext}>Getting travel information</Text>
             </View>
           )}
         </View>
       </TouchableOpacity>
 
-      {/* Control Panel - Bottom overlay with microphone and camera */}
+      {/* Control Panel - Bottom overlay with camera only */}
       <View style={styles.controlPanel}>
-        {/* Microphone Button */}
-        <TouchableOpacity 
-          style={[
-            styles.controlButton, 
-            isRecording && styles.recordingButton,
-            isProcessingAudio && styles.processingButton,
-            !aiInitialized && styles.disabledButton
-          ]} 
-          onPress={handleMicrophonePress}
-          disabled={!aiInitialized || isProcessingAudio}
-        >
-          {isProcessingAudio ? (
-            <ActivityIndicator size="small" color="#ffffff" />
-          ) : (
-            <Ionicons 
-              name={isRecording ? "mic" : "mic-outline"} 
-              size={32} 
-              color={isRecording ? "#ff4444" : (!aiInitialized ? "#666" : "#ffffff")} 
-            />
-          )}
-        </TouchableOpacity>
-
         {/* Camera Button */}
         <TouchableOpacity 
           style={[
@@ -568,7 +463,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     flexDirection: 'row',
-    justifyContent: 'space-around',
+    justifyContent: 'center',
     paddingHorizontal: 40,
   },
   controlButton: {
@@ -581,50 +476,9 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: 'rgba(255, 255, 255, 0.3)',
   },
-  recordingButton: {
-    backgroundColor: 'rgba(255, 68, 68, 0.2)',
-    borderColor: '#ff4444',
-  },
-  processingButton: {
-    backgroundColor: 'rgba(0, 122, 255, 0.2)',
-    borderColor: '#007AFF',
-  },
   disabledButton: {
     backgroundColor: 'rgba(0, 0, 0, 0.3)',
     borderColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  // Recording status styles
-  recordingOverlay: {
-    position: 'absolute',
-    bottom: 120,
-    left: 20,
-    right: 20,
-    backgroundColor: 'rgba(255, 68, 68, 0.9)',
-    padding: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  recordingIndicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  recordingDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#ffffff',
-    marginRight: 8,
-  },
-  recordingText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  recordingSubtext: {
-    color: '#ffffff',
-    fontSize: 12,
-    opacity: 0.9,
   },
   // Processing status styles
   processingOverlay: {

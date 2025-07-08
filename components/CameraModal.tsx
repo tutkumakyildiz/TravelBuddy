@@ -12,7 +12,6 @@ import {
 import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system';
-import AIService from '../services/AIService';
 
 interface CameraModalProps {
   visible: boolean;
@@ -53,12 +52,6 @@ export default function CameraModal({ visible, onClose, onPhotoAnalyzed }: Camer
         return;
       }
 
-      // Process with AI
-      const aiService = AIService.getInstance();
-      const travelQuery = "Analyze this image as a travel guide. Identify any landmarks, food, activities, interesting places, or cultural elements. Provide helpful travel information and recommendations.";
-      
-      const response = await aiService.processImage(photo.uri, travelQuery);
-      
       // Clean up the temporary photo
       try {
         await FileSystem.deleteAsync(photo.uri, { idempotent: true });
@@ -66,13 +59,19 @@ export default function CameraModal({ visible, onClose, onPhotoAnalyzed }: Camer
         console.warn('Failed to cleanup photo:', cleanupError);
       }
 
-      // Handle response
-      if (response.error) {
-        Alert.alert('AI Error', response.error);
-      } else {
-        onPhotoAnalyzed(response.text || 'No analysis available');
-        onClose();
-      }
+      // Since this is a text-only model, provide helpful guidance
+      const response = `📸 Photo captured successfully!
+
+The current AI model is text-only and cannot analyze images. However, I can help you with travel information if you:
+
+1. Tap on the map to get location-based recommendations
+2. Ask questions about travel destinations
+3. Get suggestions for activities, food, and attractions
+
+For image analysis, a multimodal AI model would be needed in a future version.`;
+
+      onPhotoAnalyzed(response);
+      onClose();
     } catch (error) {
       console.error('Error taking picture:', error);
       Alert.alert('Camera Error', 'Failed to take picture');
@@ -129,7 +128,7 @@ export default function CameraModal({ visible, onClose, onPhotoAnalyzed }: Camer
             >
               <Ionicons name="close" size={24} color="#fff" />
             </TouchableOpacity>
-            <Text style={styles.headerTitle}>Take Photo for Analysis</Text>
+            <Text style={styles.headerTitle}>Camera Feature</Text>
             <View style={styles.headerButton} />
           </View>
 
@@ -138,10 +137,10 @@ export default function CameraModal({ visible, onClose, onPhotoAnalyzed }: Camer
             {/* AI Status */}
             <View style={styles.aiStatusContainer}>
               <Text style={styles.aiStatusText}>
-                📸 AI Travel Guide Ready
+                📸 Camera Ready
               </Text>
               <Text style={styles.aiStatusSubtext}>
-                Take a photo of landmarks, food, or activities
+                Text-only AI model (image analysis not available)
               </Text>
             </View>
 
@@ -149,8 +148,8 @@ export default function CameraModal({ visible, onClose, onPhotoAnalyzed }: Camer
             {isProcessing && (
               <View style={styles.processingOverlay}>
                 <ActivityIndicator size="large" color="#fff" />
-                <Text style={styles.processingText}>Analyzing photo...</Text>
-                <Text style={styles.processingSubtext}>AI is examining your image</Text>
+                <Text style={styles.processingText}>Processing photo...</Text>
+                <Text style={styles.processingSubtext}>Saving and preparing response</Text>
               </View>
             )}
           </View>
@@ -189,7 +188,7 @@ export default function CameraModal({ visible, onClose, onPhotoAnalyzed }: Camer
 
             {/* Instructions */}
             <Text style={styles.instructionText}>
-              {isProcessing ? 'Processing with AI...' : 'Tap to capture and analyze'}
+              {isProcessing ? 'Processing photo...' : 'Tap to capture photo'}
             </Text>
           </View>
         </View>
