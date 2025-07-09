@@ -28,8 +28,10 @@ class AIService {
   private isInitialized: boolean = false;
   private modelPath: string = '';
   private isDownloading: boolean = false;
+  private isPaused: boolean = false;
   private downloadProgress: DownloadProgress = { progress: 0, totalBytesWritten: 0, totalBytesExpectedToWrite: 0 };
   private llamaContext: LlamaContext | null = null;
+  private downloadResumable: any = null;
 
   // Hugging Face model configuration
   private readonly HUGGING_FACE_CONFIG = {
@@ -179,7 +181,7 @@ class AIService {
       console.log('Available storage space check...');
 
       // Start the download with progress tracking - use proper URI
-      const downloadResumable = FileSystem.createDownloadResumable(
+      this.downloadResumable = FileSystem.createDownloadResumable(
         this.HUGGING_FACE_CONFIG.modelUrl,
         modelFileUri, // Use URI instead of raw path
         {
@@ -203,7 +205,7 @@ class AIService {
         }
       );
 
-      const result = await downloadResumable.downloadAsync();
+      const result = await this.downloadResumable.downloadAsync();
       
       if (result?.status === 200) {
         console.log('✅ Model downloaded successfully!');
@@ -473,6 +475,33 @@ class AIService {
   }
 
   /**
+   * Pause the current AI model download
+   */
+  pauseDownload(): void {
+    if (this.isDownloading && this.downloadResumable) {
+      this.isPaused = true;
+      console.log('⏸️ AI download paused');
+    }
+  }
+
+  /**
+   * Resume the paused AI model download
+   */
+  resumeDownload(): void {
+    if (this.isDownloading && this.isPaused && this.downloadResumable) {
+      this.isPaused = false;
+      console.log('▶️ AI download resumed');
+    }
+  }
+
+  /**
+   * Check if AI download is paused
+   */
+  isDownloadPaused(): boolean {
+    return this.isPaused;
+  }
+
+  /**
    * Format bytes to human readable format
    */
   public formatBytes(bytes: number): string {
@@ -511,6 +540,8 @@ class AIService {
       // Reset download state
       this.isDownloading = false;
       this.downloadProgress = { progress: 0, totalBytesWritten: 0, totalBytesExpectedToWrite: 0 };
+      this.isPaused = false; // Ensure paused state is reset
+      this.downloadResumable = null; // Clear resumable object
       
       // Clean up partial download file
       const modelFileUri = `${FileSystem.documentDirectory}models/huggingface/${this.HUGGING_FACE_CONFIG.modelName}`;

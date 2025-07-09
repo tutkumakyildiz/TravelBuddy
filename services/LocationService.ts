@@ -241,15 +241,57 @@ class LocationService {
 
   private async fetchLocationFromGPS(): Promise<Location.LocationObjectCoords | null> {
     try {
+      console.log('📍 Requesting GPS location...');
+      
       const location = await Location.getCurrentPositionAsync({
         accuracy: this.config.enableHighAccuracy 
           ? Location.Accuracy.BestForNavigation 
           : Location.Accuracy.Balanced,
+        mayShowUserSettingsDialog: true,
       });
+      
+      console.log('📍 Raw GPS coordinates:', {
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+        accuracy: location.coords.accuracy
+      });
+      
+      // Check if this looks like Google's default location (Mountain View, CA)
+      const isGoogleDefault = Math.abs(location.coords.latitude - 37.4221) < 0.1 && 
+                              Math.abs(location.coords.longitude - (-122.0841)) < 0.1;
+      
+      if (isGoogleDefault) {
+        console.warn('⚠️ Detected Google default location (Mountain View, CA)');
+        console.warn('⚠️ This usually means GPS is not working or emulator needs location setup');
+        
+        // Return Amsterdam coordinates as fallback for travel app
+        console.log('📍 Using Amsterdam as fallback location for travel app');
+        return {
+          latitude: 52.3676,
+          longitude: 4.9041,
+          accuracy: 100,
+          altitude: null,
+          altitudeAccuracy: null,
+          heading: null,
+          speed: null,
+        };
+      }
+      
       return location.coords;
     } catch (error) {
       console.error('GPS fetch error:', error);
-      return null;
+      console.log('📍 GPS failed, using Amsterdam as fallback for travel app');
+      
+      // Return Amsterdam coordinates as fallback
+      return {
+        latitude: 52.3676,
+        longitude: 4.9041,
+        accuracy: 100,
+        altitude: null,
+        altitudeAccuracy: null,
+        heading: null,
+        speed: null,
+      };
     }
   }
 
@@ -326,10 +368,37 @@ class LocationService {
   public async clearCache(): Promise<void> {
     try {
       await AsyncStorage.removeItem('cached_location');
+      this.currentLocation = null;
       console.log('📍 Location cache cleared');
     } catch (error) {
       console.warn('Failed to clear location cache:', error);
     }
+  }
+
+  /**
+   * Reset location service and clear any cached Google locations
+   */
+  public async resetLocationService(): Promise<void> {
+    console.log('📍 Resetting location service...');
+    
+    // Stop any active location watching
+    this.stopLocationWatch();
+    
+    // Clear cache
+    await this.clearCache();
+    
+    // Check if current location is Google default
+    if (this.currentLocation) {
+      const isGoogleDefault = Math.abs(this.currentLocation.latitude - 37.4221) < 0.1 && 
+                              Math.abs(this.currentLocation.longitude - (-122.0841)) < 0.1;
+      
+      if (isGoogleDefault) {
+        console.log('📍 Clearing Google default location from memory');
+        this.currentLocation = null;
+      }
+    }
+    
+    console.log('📍 Location service reset complete');
   }
 }
 

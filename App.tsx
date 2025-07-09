@@ -3,39 +3,87 @@ import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, View, TouchableOpacity, Alert, Text, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AIService from './services/AIService';
-import CameraModal from './components/CameraModal';
 import MapComponent from './components/MapComponent';
-import DraggableLocation from './components/DraggableLocation';
 import LocationService, { LocationData } from './services/LocationService';
+import OfflineMapService from './services/OfflineMapService';
 
 export default function App() {
   const [aiInitialized, setAiInitialized] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [lastAiResponse, setLastAiResponse] = useState<string>('');
-  const [cameraModalVisible, setCameraModalVisible] = useState(false);
   const [isProcessingLocation, setIsProcessingLocation] = useState(false);
   const [initializationAttempted, setInitializationAttempted] = useState(false);
   
+  // Map download state
+  const [mapDownloaded, setMapDownloaded] = useState(false);
+  const [mapLoading, setMapLoading] = useState(false);
+  const [mapPaused, setMapPaused] = useState(false);
+  const [mapProgress, setMapProgress] = useState(0);
+  const [mapInitialized, setMapInitialized] = useState(false);
+  
+  // AI download state
+  const [aiPaused, setAiPaused] = useState(false);
+  const [aiProgress, setAiProgress] = useState(0);
+
   // Real location data using LocationService
   const [currentLocation, setCurrentLocation] = useState<LocationData | null>(null);
   const [locationLoading, setLocationLoading] = useState(true);
   const [locationError, setLocationError] = useState<string | null>(null);
   
   const locationService = LocationService.getInstance();
+  const offlineMapService = OfflineMapService.getInstance();
 
-  // Initialize location service and get current location
+  // Initialize location service and check map status
   useEffect(() => {
-    console.log('🚀 App started - AI will be initialized when needed (lazy loading)');
-    console.log('📱 This prevents startup crashes and improves app launch time');
+    console.log('🚀 App started - LocalTravelBuddy');
+    console.log('📱 Checking initial state...');
     
     // Initialize location service
     initializeLocationService();
+    
+    // Check if map data is already downloaded
+    checkMapDownloadStatus();
     
     // Cleanup function to stop location watch
     return () => {
       locationService.stopLocationWatch();
     };
   }, []);
+
+  // Poll for download progress
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (mapLoading) {
+        const progress = offlineMapService.getDownloadProgress();
+        setMapProgress(progress.progress);
+        setMapPaused(offlineMapService.isDownloadPaused());
+      }
+      
+      if (aiLoading) {
+        const aiService = AIService.getInstance();
+        const progress = aiService.getDownloadProgress();
+        if (progress) {
+          setAiProgress(progress.progress);
+        }
+        setAiPaused(aiService.isDownloadPaused());
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [mapLoading, aiLoading]);
+
+  const checkMapDownloadStatus = async () => {
+    try {
+      console.log('🗺️ Checking map download status...');
+      const status = await offlineMapService.getOfflineDataStatus();
+      setMapDownloaded(status.tilesDownloaded && status.attractionsDownloaded);
+      setMapInitialized(true);
+      console.log('🗺️ Map status:', status);
+    } catch (error) {
+      console.error('❌ Failed to check map status:', error);
+      setMapInitialized(true);
+    }
+  };
 
   const initializeLocationService = async () => {
     try {
@@ -44,18 +92,33 @@ export default function App() {
       
       console.log('📍 Initializing location service...');
       
+      // Reset location service to clear any cached Google locations
+      await locationService.resetLocationService();
+      
       // Initialize location service with permissions
       const initialized = await locationService.initialize();
       
       if (initialized) {
         console.log('✅ Location service initialized successfully');
         
-        // Get current location
-        const location = await locationService.getCurrentLocation();
+        // Get current location (force refresh to avoid cache)
+        const location = await locationService.getCurrentLocation(true);
         
         if (location) {
           setCurrentLocation(location);
           console.log('📍 Current location:', location.placeName);
+          console.log('📍 Coordinates:', location.latitude, location.longitude);
+          
+          // Check if this is Amsterdam (fallback) or real location
+          const isAmsterdam = Math.abs(location.latitude - 52.3676) < 0.001 && 
+                             Math.abs(location.longitude - 4.9041) < 0.001;
+          
+          if (isAmsterdam) {
+            console.log('📍 Using Amsterdam fallback location (GPS may not be available)');
+            setLocationError('Using Amsterdam as fallback location. GPS may not be available.');
+          } else {
+            console.log('📍 Using real GPS location');
+          }
           
           // Start watching location changes
           await locationService.startLocationWatch((newLocation) => {
@@ -201,50 +264,162 @@ export default function App() {
     }
   };
 
-  const handleCameraPress = async () => {
-    // Mandatory AI initialization for camera features
-    if (!aiInitialized && !initializationAttempted) {
-      console.log('🔄 User requested camera AI feature - starting mandatory AI initialization...');
-      const initialized = await initializeAILazily();
-      if (!initialized) {
-        Alert.alert(
-          'AI Required', 
-          'Failed to initialize AI. Please try again.',
-          [{ text: 'Retry', onPress: () => handleCameraPress() }]
-        );
-        return;
-      }
-    }
-
-    // If AI is still loading, show status and wait
+  const handleDownloadAI = async () => {
     if (aiLoading) {
-      Alert.alert(
-        'AI Loading', 
-        'AI model is still loading in the background. Please wait a moment and try again.',
-        [{ text: 'OK', style: 'default' }]
-      );
+      // Toggle pause/resume
+      if (aiPaused) {
+        const aiService = AIService.getInstance();
+        aiService.resumeDownload();
+        setAiPaused(false);
+      } else {
+        const aiService = AIService.getInstance();
+        aiService.pauseDownload();
+        setAiPaused(true);
+      }
       return;
     }
 
-    // AI must be ready to proceed
-    if (!aiInitialized) {
-      Alert.alert('AI Required', 'AI must be initialized to use camera features.');
+    if (aiInitialized) {
+      Alert.alert('AI Already Ready', 'AI model is already downloaded and ready to use.');
       return;
     }
+
+    Alert.alert(
+      'Download AI Model',
+      'This will download the Gemma 3n AI model (2.9GB).\n\nFirst time setup may take 5-10 minutes depending on your internet connection.\n\nYou can pause/resume anytime.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Download', 
+          onPress: async () => {
+            console.log('🔄 User initiated AI model download...');
+            setAiProgress(0);
+            const initialized = await initializeAILazily();
+            if (!initialized) {
+              Alert.alert(
+                'Download Failed', 
+                'Failed to download AI model. Please check your internet connection and try again.',
+                [{ text: 'OK', style: 'default' }]
+              );
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const handleDownloadMap = async () => {
+    if (mapLoading) {
+      // Toggle pause/resume
+      if (mapPaused) {
+        offlineMapService.resumeDownload();
+        setMapPaused(false);
+      } else {
+        offlineMapService.pauseDownload();
+        setMapPaused(true);
+      }
+      return;
+    }
+
+    if (mapDownloaded) {
+      Alert.alert('Map Already Downloaded', 'Amsterdam map and attractions are already available offline.');
+      return;
+    }
+
+    Alert.alert(
+      'Download Amsterdam Map',
+      'This will download Amsterdam map tiles and attraction points for offline use.\n\nSize: ~100MB\nTime: 5-10 minutes\n\nYou can pause/resume anytime.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Download', 
+          onPress: async () => {
+            console.log('🗺️ User initiated map download...');
+            setMapLoading(true);
+            setMapProgress(0);
+            
+            try {
+              const success = await offlineMapService.downloadCompleteOfflineData();
+              if (success) {
+                setMapDownloaded(true);
+                Alert.alert(
+                  'Map Downloaded!',
+                  'Amsterdam map and attractions are now available offline. You can now explore the city!',
+                  [{ text: 'Great!' }]
+                );
+              } else {
+                Alert.alert('Download Failed', 'Failed to download map data. Please try again.');
+              }
+            } catch (error) {
+              console.error('❌ Map download failed:', error);
+              Alert.alert('Download Failed', `Error: ${error.message}`);
+            } finally {
+              setMapLoading(false);
+              setMapProgress(0);
+              setMapPaused(false);
+            }
+          }
+        }
+      ]
+    );
+  };
+
+
+
+  const handleLocationRefresh = async () => {
+    try {
+      console.log('📍 User requested location refresh...');
+      setLocationLoading(true);
+      setLocationError(null);
+      
+      // Clear cache and get fresh location
+      await locationService.clearCache();
+      const location = await locationService.getCurrentLocation(true);
+      
+      if (location) {
+        setCurrentLocation(location);
+        console.log('📍 Location refreshed:', location.placeName);
+        console.log('📍 Coordinates:', location.latitude, location.longitude);
+        
+        // Check if this is Amsterdam (fallback) or real location
+        const isAmsterdam = Math.abs(location.latitude - 52.3676) < 0.001 && 
+                           Math.abs(location.longitude - 4.9041) < 0.001;
+        
+        if (isAmsterdam) {
+          Alert.alert(
+            'Location Info',
+            'Using Amsterdam as fallback location.\n\nThis happens when:\n• GPS is disabled\n• Using Android emulator\n• Location permissions not granted\n\nTo get your real location:\n• Enable GPS/Location Services\n• Grant location permissions\n• Use a real device with GPS',
+            [{ text: 'OK' }]
+          );
+        } else {
+          Alert.alert('Location Updated', `Found your location: ${location.placeName}`, [{ text: 'OK' }]);
+        }
+      } else {
+        setLocationError('Failed to refresh location');
+        Alert.alert('Location Error', 'Failed to get your location. Using Amsterdam as fallback.', [{ text: 'OK' }]);
+      }
+    } catch (error) {
+      console.error('❌ Location refresh error:', error);
+      setLocationError(`Location refresh error: ${error.message}`);
+    } finally {
+      setLocationLoading(false);
+    }
+  };
+
+  const handleMapPress = async (clickData: { latitude: number; longitude: number; attraction?: string; attractionData?: any }) => {
+    console.log('🗺️ Map pressed at coordinates:', clickData);
     
-    setCameraModalVisible(true);
-  };
+    // Show immediate feedback
+    const locationText = clickData.attraction 
+      ? `Analyzing ${clickData.attraction}...`
+      : `Analyzing the location you clicked on the map...\n\nCoordinates: ${clickData.latitude.toFixed(4)}, ${clickData.longitude.toFixed(4)}`;
+    
+    Alert.alert(
+      'AI Processing Location',
+      locationText,
+      [{ text: 'OK', style: 'default' }]
+    );
 
-  const handlePhotoAnalyzed = (response: string) => {
-    setLastAiResponse(response);
-    Alert.alert('AI Photo Analysis', response);
-  };
-
-  const handleCloseCameraModal = () => {
-    setCameraModalVisible(false);
-  };
-
-  const handleMapPress = async () => {
     // Lazy initialization for map AI features
     if (!aiInitialized && !initializationAttempted) {
       console.log('🔄 User requested map AI feature - starting lazy initialization...');
@@ -253,7 +428,7 @@ export default function App() {
         Alert.alert(
           'AI Required', 
           'Failed to initialize AI. Please try again.',
-          [{ text: 'Retry', onPress: () => handleMapPress() }]
+          [{ text: 'Retry', onPress: () => handleMapPress(clickData) }]
         );
         return;
       }
@@ -277,83 +452,29 @@ export default function App() {
 
     try {
       setIsProcessingLocation(true);
-      console.log('🗺️ Processing location query...');
+      console.log('🗺️ Processing clicked location query...');
       
       const aiService = AIService.getInstance();
-      const response = await aiService.processLocationQuery(
-        currentLocation.latitude,
-        currentLocation.longitude,
-        currentLocation.placeName
-      );
       
-      setLastAiResponse(response.text || '');
-      
-      if (response.error) {
-        Alert.alert('Error', response.error);
+      // Create detailed query for AI if attraction data is available
+      let query = '';
+      if (clickData.attractionData) {
+        const attraction = clickData.attractionData;
+        query = `Tell me about ${attraction.name} in Amsterdam. It's a ${attraction.type} in the ${attraction.category} category. `;
+        if (attraction.description) {
+          query += `Description: ${attraction.description}. `;
+        }
+        if (attraction.address) {
+          query += `Address: ${attraction.address}. `;
+        }
+        query += `Please provide interesting facts, historical information, visitor tips, and recommendations for this location.`;
+      } else if (clickData.attraction) {
+        query = `Tell me about ${clickData.attraction} in Amsterdam. Please provide interesting facts, historical information, visitor tips, and recommendations for this location.`;
       } else {
-        Alert.alert('Location Information', response.text || 'No information available');
+        query = `Tell me about the location at coordinates ${clickData.latitude.toFixed(4)}, ${clickData.longitude.toFixed(4)} in Amsterdam. What's interesting about this area?`;
       }
-    } catch (error) {
-      console.error('Error processing location:', error);
-      Alert.alert('Error', 'Failed to process location query. Please try again.');
-    } finally {
-      setIsProcessingLocation(false);
-    }
-  };
-
-  const handlePlaceSymbolDrop = async (coordinates: { x: number; y: number }) => {
-    console.log('🎯 Place symbol dropped at screen coordinates:', coordinates);
-    
-    // Show immediate feedback
-    Alert.alert(
-      'AI Processing Location',
-      'Analyzing the location where you dropped the symbol...',
-      [{ text: 'OK', style: 'default' }]
-    );
-
-    // Lazy initialization for AI features
-    if (!aiInitialized && !initializationAttempted) {
-      console.log('🔄 User requested AI feature - starting lazy initialization...');
-      const initialized = await initializeAILazily();
-      if (!initialized) {
-        Alert.alert(
-          'AI Required', 
-          'Failed to initialize AI. Please try again.',
-          [{ text: 'Retry', onPress: () => handlePlaceSymbolDrop(coordinates) }]
-        );
-        return;
-      }
-    }
-
-    // If AI is still loading, show status and wait
-    if (aiLoading) {
-      Alert.alert(
-        'AI Loading', 
-        'AI model is still loading in the background. Please wait a moment and try again.',
-        [{ text: 'OK', style: 'default' }]
-      );
-      return;
-    }
-
-    // AI must be ready to proceed
-    if (!aiInitialized) {
-      Alert.alert('AI Required', 'AI must be initialized to use location features.');
-      return;
-    }
-
-    try {
-      setIsProcessingLocation(true);
-      console.log('🗺️ Processing dropped location query...');
       
-      const aiService = AIService.getInstance();
-      
-      // For MVP, use current location as the base and assume user is exploring nearby
-      // In a full version, we'd convert screen coordinates to map coordinates
-      const response = await aiService.processLocationQuery(
-        currentLocation?.latitude || 52.3676, // Default to Amsterdam if no location
-        currentLocation?.longitude || 4.9041,
-        currentLocation?.placeName || 'Unknown location'
-      );
+      const response = await aiService.processText(query);
       
       setLastAiResponse(response.text || '');
       
@@ -361,18 +482,20 @@ export default function App() {
         Alert.alert('Error', response.error);
       } else {
         Alert.alert(
-          'Location Exploration',
-          `🎯 AI Analysis:\n\n${response.text || 'No information available'}`,
+          clickData.attraction ? `🎯 ${clickData.attraction}` : 'Location Analysis',
+          `${response.text || 'No information available'}`,
           [{ text: 'Great!', style: 'default' }]
         );
       }
     } catch (error) {
-      console.error('Error processing dropped location:', error);
+      console.error('Error processing location query:', error);
       Alert.alert('Error', 'Failed to process location query. Please try again.');
     } finally {
       setIsProcessingLocation(false);
     }
   };
+
+
 
   return (
     <View style={styles.container}>
@@ -381,56 +504,12 @@ export default function App() {
         <MapComponent 
           style={styles.map}
           currentLocation={currentLocation}
-          onMapPress={(coordinates) => {
-            console.log('🗺️ Map pressed at:', coordinates);
-            handleMapPress();
+          onMapPress={(clickData) => {
+            console.log('🗺️ Map pressed at:', clickData);
+            handleMapPress(clickData);
           }}
         />
         
-        {/* Location Status indicator overlay */}
-        <View style={styles.locationStatusOverlay}>
-          {locationLoading ? (
-            <View style={styles.locationStatusContent}>
-              <ActivityIndicator size="small" color="#666" />
-              <Text style={styles.locationStatusText}>Getting location...</Text>
-            </View>
-          ) : locationError ? (
-            <View style={styles.locationStatusContent}>
-              <View style={[styles.locationStatusDot, { backgroundColor: '#F44336' }]} />
-              <Text style={styles.locationStatusText}>Location Error</Text>
-            </View>
-          ) : currentLocation ? (
-            <View style={styles.locationStatusContent}>
-              <View style={[styles.locationStatusDot, { backgroundColor: '#4CAF50' }]} />
-              <Text style={styles.locationStatusText}>
-                {currentLocation.placeName}
-              </Text>
-            </View>
-          ) : (
-            <View style={styles.locationStatusContent}>
-              <View style={[styles.locationStatusDot, { backgroundColor: '#FF9800' }]} />
-              <Text style={styles.locationStatusText}>Location Unknown</Text>
-            </View>
-          )}
-        </View>
-
-        {/* AI Status indicator overlay */}
-        <View style={styles.aiStatusOverlay}>
-          {aiLoading ? (
-            <View style={styles.aiStatusContent}>
-              <ActivityIndicator size="small" color="#666" />
-              <Text style={styles.aiStatusText}>Loading AI...</Text>
-            </View>
-          ) : (
-            <View style={styles.aiStatusContent}>
-              <View style={[styles.aiStatusDot, { backgroundColor: aiInitialized ? '#4CAF50' : '#F44336' }]} />
-              <Text style={styles.aiStatusText}>
-                AI {aiInitialized ? 'Ready' : 'Not Ready'}
-              </Text>
-            </View>
-          )}
-        </View>
-
         {/* Last AI Response Display */}
         {lastAiResponse && !isProcessingLocation && (
           <View style={styles.responseOverlay}>
@@ -440,7 +519,7 @@ export default function App() {
           </View>
         )}
 
-        {/* Processing Status Display */}
+                {/* Processing Status Display */}
         {isProcessingLocation && (
           <View style={styles.processingOverlay}>
             <ActivityIndicator size="large" color="#007AFF" />
@@ -449,55 +528,91 @@ export default function App() {
           </View>
         )}
 
-        {/* Draggable Place Symbol */}
-        <DraggableLocation onDrop={handlePlaceSymbolDrop} />
-      </View>
+        {/* Download Status Bar */}
+        {(!mapDownloaded || !aiInitialized) && (
+          <View style={styles.downloadStatusBar}>
+            <Text style={styles.downloadStatusTitle}>Setup Required</Text>
+            
+            {/* Map Download Status */}
+            {!mapDownloaded && (
+              <TouchableOpacity 
+                style={styles.downloadStatusItem}
+                onPress={handleDownloadMap}
+              >
+                <View style={styles.downloadStatusContent}>
+                  <Ionicons 
+                    name={mapLoading ? (mapPaused ? "play" : "pause") : "map-outline"} 
+                    size={20} 
+                    color="#4CAF50" 
+                  />
+                  <View style={styles.downloadStatusText}>
+                    <Text style={styles.downloadStatusName}>
+                      {mapLoading ? (mapPaused ? 'Resume Map' : 'Pause Map') : 'Download Map'}
+                    </Text>
+                    <Text style={styles.downloadStatusSubtext}>
+                      {mapLoading ? `${(mapProgress * 100).toFixed(0)}% downloaded` : 'Amsterdam with attractions'}
+                    </Text>
+                  </View>
+                </View>
+                {mapLoading && !mapPaused && (
+                  <View style={styles.progressBarContainer}>
+                    <View style={[styles.progressBar, { width: `${mapProgress * 100}%` }]} />
+                  </View>
+                )}
+              </TouchableOpacity>
+            )}
+            
+            {/* AI Download Status */}
+            {!aiInitialized && (
+              <TouchableOpacity 
+                style={styles.downloadStatusItem}
+                onPress={handleDownloadAI}
+              >
+                <View style={styles.downloadStatusContent}>
+                  <Ionicons 
+                    name={aiLoading ? (aiPaused ? "play" : "pause") : "hardware-chip-outline"} 
+                    size={20} 
+                    color="#FF9800" 
+                  />
+                  <View style={styles.downloadStatusText}>
+                    <Text style={styles.downloadStatusName}>
+                      {aiLoading ? (aiPaused ? 'Resume AI' : 'Pause AI') : 'Download AI'}
+                    </Text>
+                    <Text style={styles.downloadStatusSubtext}>
+                      {aiLoading ? `${(aiProgress * 100).toFixed(0)}% downloaded` : 'Gemma 3n AI Model'}
+                    </Text>
+                  </View>
+                </View>
+                {aiLoading && !aiPaused && (
+                  <View style={styles.progressBarContainer}>
+                    <View style={[styles.progressBar, { width: `${aiProgress * 100}%` }]} />
+                  </View>
+                )}
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
 
-      {/* Control Panel - Bottom overlay with camera and location controls */}
-      <View style={styles.controlPanel}>
-        {/* Location Refresh Button */}
-        <TouchableOpacity 
-          style={[
-            styles.controlButton,
-            styles.locationButton,
-            locationLoading && styles.disabledButton
-          ]} 
-          onPress={async () => {
-            console.log('📍 Manual location refresh requested');
-            await locationService.getCurrentLocation(true); // Force refresh
-          }}
-          disabled={locationLoading}
-        >
-          <Ionicons 
-            name="location-outline" 
-            size={32} 
-            color={locationLoading ? "#666" : "#ffffff"} 
-          />
-        </TouchableOpacity>
-        
-        {/* Camera Button */}
-        <TouchableOpacity 
-          style={[
-            styles.controlButton,
-            !aiInitialized && styles.disabledButton
-          ]} 
-          onPress={handleCameraPress}
-          disabled={!aiInitialized && !aiLoading}
-        >
-          <Ionicons 
-            name="camera-outline" 
-            size={32} 
-            color={!aiInitialized ? "#666" : "#ffffff"} 
-          />
-        </TouchableOpacity>
-      </View>
+        {/* Location Refresh Button - Only show when ready */}
+        {mapDownloaded && aiInitialized && (
+          <TouchableOpacity 
+            style={[
+              styles.floatingButton,
+              styles.locationButton,
+              locationLoading && styles.disabledButton
+            ]} 
+            onPress={handleLocationRefresh}
+            disabled={locationLoading}
+          >
+            <Ionicons 
+              name="location-outline" 
+              size={24} 
+              color={locationLoading ? "#666" : "#ffffff"} 
+            />
+          </TouchableOpacity>
+        )}
 
-      {/* Camera Modal */}
-      <CameraModal
-        visible={cameraModalVisible}
-        onClose={handleCloseCameraModal}
-        onPhotoAnalyzed={handlePhotoAnalyzed}
-      />
+      </View>
 
       <StatusBar style="auto" />
     </View>
@@ -684,6 +799,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 152, 0, 0.7)',
     marginRight: 20,
   },
+  downloadButton: {
+    backgroundColor: 'rgba(76, 175, 80, 0.7)',
+    marginRight: 20,
+  },
   disabledButton: {
     backgroundColor: 'rgba(0, 0, 0, 0.3)',
     borderColor: 'rgba(255, 255, 255, 0.1)',
@@ -710,5 +829,132 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 4,
     opacity: 0.9,
+  },
+  
+  // Download Panel Styles
+  downloadPanel: {
+    position: 'absolute',
+    bottom: 50,
+    left: 20,
+    right: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.9)',
+    borderRadius: 20,
+    padding: 20,
+    alignItems: 'center',
+  },
+  downloadPanelTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#ffffff',
+    marginBottom: 8,
+  },
+  downloadPanelSubtitle: {
+    fontSize: 14,
+    color: '#cccccc',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  downloadPanelButton: {
+    width: '100%',
+    backgroundColor: 'rgba(0, 122, 255, 0.8)',
+    borderRadius: 12,
+    marginBottom: 12,
+    padding: 16,
+  },
+  mapDownloadButton: {
+    backgroundColor: 'rgba(76, 175, 80, 0.8)',
+  },
+  aiDownloadButton: {
+    backgroundColor: 'rgba(255, 152, 0, 0.8)',
+  },
+  downloadButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  downloadButtonText: {
+    marginLeft: 12,
+    flex: 1,
+  },
+  downloadButtonTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#ffffff',
+  },
+  downloadButtonSubtitle: {
+    fontSize: 12,
+    color: '#cccccc',
+    marginTop: 2,
+  },
+  
+  // Download Status Bar Styles
+  downloadStatusBar: {
+    position: 'absolute',
+    top: 60,
+    left: 20,
+    right: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
+    borderRadius: 12,
+    padding: 16,
+  },
+  downloadStatusTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#ffffff',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  downloadStatusItem: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+  },
+  downloadStatusContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  downloadStatusText: {
+    marginLeft: 12,
+    flex: 1,
+  },
+  downloadStatusName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#ffffff',
+  },
+  downloadStatusSubtext: {
+    fontSize: 12,
+    color: '#cccccc',
+    marginTop: 2,
+  },
+  progressBarContainer: {
+    height: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderRadius: 2,
+    marginTop: 8,
+    overflow: 'hidden',
+  },
+  progressBar: {
+    height: '100%',
+    backgroundColor: '#4CAF50',
+    borderRadius: 2,
+  },
+  
+  // Floating Button Styles
+  floatingButton: {
+    position: 'absolute',
+    bottom: 30,
+    right: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    borderRadius: 25,
+    width: 50,
+    height: 50,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
 });

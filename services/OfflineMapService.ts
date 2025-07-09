@@ -8,6 +8,13 @@ interface TileDownloadProgress {
   isDownloading: boolean;
 }
 
+interface AttractionDownloadProgress {
+  totalAttractions: number;
+  downloadedAttractions: number;
+  progress: number;
+  isDownloading: boolean;
+}
+
 interface BoundingBox {
   north: number;
   south: number;
@@ -15,12 +22,44 @@ interface BoundingBox {
   west: number;
 }
 
+export interface Attraction {
+  id: string;
+  name: string;
+  type: string;
+  category: string;
+  latitude: number;
+  longitude: number;
+  tags: { [key: string]: string };
+  description?: string;
+  website?: string;
+  address?: string;
+  openingHours?: string;
+  phone?: string;
+  rating?: number;
+  imageUrl?: string;
+}
+
+interface AttractionsData {
+  attractions: Attraction[];
+  lastUpdated: string;
+  totalCount: number;
+  categories: string[];
+}
+
 class OfflineMapService {
   private static instance: OfflineMapService;
   private isDownloading: boolean = false;
+  private isDownloadingAttractions: boolean = false;
+  private isPaused: boolean = false;
   private downloadProgress: TileDownloadProgress = {
     totalTiles: 0,
     downloadedTiles: 0,
+    progress: 0,
+    isDownloading: false
+  };
+  private attractionDownloadProgress: AttractionDownloadProgress = {
+    totalAttractions: 0,
+    downloadedAttractions: 0,
     progress: 0,
     isDownloading: false
   };
@@ -64,10 +103,68 @@ class OfflineMapService {
         console.log('📁 Created tiles directory');
       }
       
+      // Create attractions directory
+      const attractionsDir = `${FileSystem.documentDirectory}attractions/`;
+      const attractionsDirInfo = await FileSystem.getInfoAsync(attractionsDir);
+      
+      if (!attractionsDirInfo.exists) {
+        await FileSystem.makeDirectoryAsync(attractionsDir, { intermediates: true });
+        console.log('📁 Created attractions directory');
+      }
+      
       return true;
     } catch (error) {
       console.error('❌ Failed to initialize offline map service:', error);
       return false;
+    }
+  }
+
+  /**
+   * Download complete offline data (maps + attractions)
+   */
+  async downloadCompleteOfflineData(): Promise<boolean> {
+    try {
+      console.log('📥 Starting complete offline data download...');
+      
+      Alert.alert(
+        'Complete Offline Download',
+        'This will download map tiles and attractions for Amsterdam.\n\nThis may take 10-15 minutes and requires ~100MB storage.\n\nYou can use your phone while this downloads in the background.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Download', onPress: this.performCompleteDownload.bind(this) }
+        ]
+      );
+      
+      return true;
+    } catch (error) {
+      console.error('❌ Failed to start complete download:', error);
+      return false;
+    }
+  }
+
+  private async performCompleteDownload(): Promise<void> {
+    try {
+      // Step 1: Download map tiles
+      console.log('🗺️ Step 1: Downloading map tiles...');
+      await this.downloadAmsterdamTiles();
+      
+      // Step 2: Download attractions
+      console.log('🎯 Step 2: Downloading attractions...');
+      await this.downloadAmsterdamAttractions();
+      
+      Alert.alert(
+        'Download Complete!',
+        'Amsterdam maps and attractions are now available offline!\n\nYou can explore the city without internet connection.',
+        [{ text: 'Awesome!' }]
+      );
+      
+    } catch (error) {
+      console.error('❌ Complete download failed:', error);
+      Alert.alert(
+        'Download Failed',
+        `Failed to download offline data: ${error.message}`,
+        [{ text: 'OK' }]
+      );
     }
   }
 
@@ -112,6 +209,18 @@ class OfflineMapService {
         
                   // Download tiles sequentially to be respectful to OSM servers
           for (const tile of tiles) {
+            // Check if download is paused
+            while (this.isPaused && this.isDownloading) {
+              console.log('⏸️ Download paused, waiting...');
+              await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+            
+            // Check if download was cancelled
+            if (!this.isDownloading) {
+              console.log('❌ Download cancelled');
+              return false;
+            }
+            
             try {
               const success = await this.downloadTile(tile.x, tile.y, zoom);
               if (success) {
@@ -154,6 +263,298 @@ class OfflineMapService {
     } finally {
       this.isDownloading = false;
       this.downloadProgress.isDownloading = false;
+    }
+  }
+
+  /**
+   * Download Amsterdam attractions using Overpass API
+   */
+  async downloadAmsterdamAttractions(): Promise<boolean> {
+    if (this.isDownloadingAttractions) {
+      console.log('Attractions download already in progress');
+      return false;
+    }
+
+    try {
+      this.isDownloadingAttractions = true;
+      this.attractionDownloadProgress.isDownloading = true;
+      
+      console.log('🎯 Starting Amsterdam attractions download...');
+      
+      // Overpass API query for Amsterdam attractions
+      const overpassQuery = `
+        [out:json][timeout:120];
+        (
+          // Museums
+          nwr["tourism"="museum"](${this.AMSTERDAM_BBOX.south},${this.AMSTERDAM_BBOX.west},${this.AMSTERDAM_BBOX.north},${this.AMSTERDAM_BBOX.east});
+          
+          // Attractions & viewpoints
+          nwr["tourism"="attraction"](${this.AMSTERDAM_BBOX.south},${this.AMSTERDAM_BBOX.west},${this.AMSTERDAM_BBOX.north},${this.AMSTERDAM_BBOX.east});
+          nwr["tourism"="viewpoint"](${this.AMSTERDAM_BBOX.south},${this.AMSTERDAM_BBOX.west},${this.AMSTERDAM_BBOX.north},${this.AMSTERDAM_BBOX.east});
+          
+          // Historic sites
+          nwr["historic"~"^(monument|castle|palace|church|building|archaeological_site)$"](${this.AMSTERDAM_BBOX.south},${this.AMSTERDAM_BBOX.west},${this.AMSTERDAM_BBOX.north},${this.AMSTERDAM_BBOX.east});
+          
+          // Parks & gardens
+          nwr["leisure"="park"](${this.AMSTERDAM_BBOX.south},${this.AMSTERDAM_BBOX.west},${this.AMSTERDAM_BBOX.north},${this.AMSTERDAM_BBOX.east});
+          nwr["leisure"="garden"](${this.AMSTERDAM_BBOX.south},${this.AMSTERDAM_BBOX.west},${this.AMSTERDAM_BBOX.north},${this.AMSTERDAM_BBOX.east});
+          
+          // Theaters, cinemas & arts
+          nwr["amenity"="theatre"](${this.AMSTERDAM_BBOX.south},${this.AMSTERDAM_BBOX.west},${this.AMSTERDAM_BBOX.north},${this.AMSTERDAM_BBOX.east});
+          nwr["amenity"="cinema"](${this.AMSTERDAM_BBOX.south},${this.AMSTERDAM_BBOX.west},${this.AMSTERDAM_BBOX.north},${this.AMSTERDAM_BBOX.east});
+          nwr["amenity"="arts_centre"](${this.AMSTERDAM_BBOX.south},${this.AMSTERDAM_BBOX.west},${this.AMSTERDAM_BBOX.north},${this.AMSTERDAM_BBOX.east});
+          
+          // Places of worship
+          nwr["amenity"="place_of_worship"](${this.AMSTERDAM_BBOX.south},${this.AMSTERDAM_BBOX.west},${this.AMSTERDAM_BBOX.north},${this.AMSTERDAM_BBOX.east});
+          
+          // Markets & shopping
+          nwr["amenity"="marketplace"](${this.AMSTERDAM_BBOX.south},${this.AMSTERDAM_BBOX.west},${this.AMSTERDAM_BBOX.north},${this.AMSTERDAM_BBOX.east});
+          nwr["shop"="mall"](${this.AMSTERDAM_BBOX.south},${this.AMSTERDAM_BBOX.west},${this.AMSTERDAM_BBOX.north},${this.AMSTERDAM_BBOX.east});
+          
+          // Popular restaurants & cafes
+          nwr["amenity"="restaurant"]["name"](${this.AMSTERDAM_BBOX.south},${this.AMSTERDAM_BBOX.west},${this.AMSTERDAM_BBOX.north},${this.AMSTERDAM_BBOX.east});
+          nwr["amenity"="cafe"]["name"](${this.AMSTERDAM_BBOX.south},${this.AMSTERDAM_BBOX.west},${this.AMSTERDAM_BBOX.north},${this.AMSTERDAM_BBOX.east});
+          
+          // Transportation hubs
+          nwr["railway"="station"](${this.AMSTERDAM_BBOX.south},${this.AMSTERDAM_BBOX.west},${this.AMSTERDAM_BBOX.north},${this.AMSTERDAM_BBOX.east});
+          nwr["amenity"="ferry_terminal"](${this.AMSTERDAM_BBOX.south},${this.AMSTERDAM_BBOX.west},${this.AMSTERDAM_BBOX.north},${this.AMSTERDAM_BBOX.east});
+        );
+        out geom;
+      `;
+
+      const encodedQuery = encodeURIComponent(overpassQuery);
+      const overpassUrl = `https://overpass-api.de/api/interpreter?data=${encodedQuery}`;
+      
+      console.log('📡 Fetching attractions from Overpass API...');
+      
+      const response = await fetch(overpassUrl, {
+        headers: {
+          'User-Agent': 'LocalTravelBuddy/1.0 (Development Build)',
+          'Accept': 'application/json',
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      // Process the data
+      const attractions = this.processOverpassData(data);
+      this.attractionDownloadProgress.totalAttractions = attractions.length;
+      
+      // Save to local storage
+      await this.saveAttractionsToLocal(attractions);
+      
+      console.log(`✅ Downloaded ${attractions.length} attractions for Amsterdam`);
+      return true;
+      
+    } catch (error) {
+      console.error('❌ Failed to download attractions:', error);
+      return false;
+    } finally {
+      this.isDownloadingAttractions = false;
+      this.attractionDownloadProgress.isDownloading = false;
+    }
+  }
+
+  /**
+   * Process raw Overpass API data into attractions
+   */
+  private processOverpassData(data: any): Attraction[] {
+    const attractions: Attraction[] = [];
+    
+    data.elements.forEach((element: any) => {
+      if (!element.tags || !element.tags.name) return;
+      
+      let lat: number, lon: number;
+      
+      // Handle different geometry types
+      if (element.lat && element.lon) {
+        lat = element.lat;
+        lon = element.lon;
+      } else if (element.center) {
+        lat = element.center.lat;
+        lon = element.center.lon;
+      } else if (element.geometry && element.geometry.length > 0) {
+        // For ways, use the first point
+        lat = element.geometry[0].lat;
+        lon = element.geometry[0].lon;
+      } else {
+        return; // Skip if no coordinates
+      }
+      
+      // Skip if coordinates are outside Amsterdam bounds
+      if (lat < this.AMSTERDAM_BBOX.south || lat > this.AMSTERDAM_BBOX.north ||
+          lon < this.AMSTERDAM_BBOX.west || lon > this.AMSTERDAM_BBOX.east) {
+        return;
+      }
+      
+      // Determine attraction type and category
+      const { type, category } = this.getAttractionTypeAndCategory(element.tags);
+      
+      const attraction: Attraction = {
+        id: element.id.toString(),
+        name: element.tags.name || 'Unknown',
+        type: type,
+        category: category,
+        latitude: lat,
+        longitude: lon,
+        tags: element.tags,
+        description: element.tags.description || element.tags['description:en'],
+        website: element.tags.website || element.tags['contact:website'],
+        address: this.formatAddress(element.tags),
+        openingHours: element.tags.opening_hours || element.tags['opening_hours:covid19'],
+        phone: element.tags.phone || element.tags['contact:phone'],
+        rating: this.extractRating(element.tags)
+      };
+      
+      attractions.push(attraction);
+    });
+    
+    return attractions;
+  }
+
+  /**
+   * Determine attraction type and category from OSM tags
+   */
+  private getAttractionTypeAndCategory(tags: any): { type: string; category: string } {
+    // Museums
+    if (tags.tourism === 'museum') {
+      return { type: 'museum', category: 'Culture' };
+    }
+    
+    // Tourism attractions
+    if (tags.tourism === 'attraction') {
+      return { type: 'attraction', category: 'Tourism' };
+    }
+    
+    if (tags.tourism === 'viewpoint') {
+      return { type: 'viewpoint', category: 'Tourism' };
+    }
+    
+    // Historic sites
+    if (tags.historic) {
+      return { type: tags.historic, category: 'Historic' };
+    }
+    
+    // Parks & nature
+    if (tags.leisure === 'park') {
+      return { type: 'park', category: 'Nature' };
+    }
+    
+    if (tags.leisure === 'garden') {
+      return { type: 'garden', category: 'Nature' };
+    }
+    
+    // Entertainment
+    if (tags.amenity === 'theatre') {
+      return { type: 'theater', category: 'Entertainment' };
+    }
+    
+    if (tags.amenity === 'cinema') {
+      return { type: 'cinema', category: 'Entertainment' };
+    }
+    
+    if (tags.amenity === 'arts_centre') {
+      return { type: 'arts_center', category: 'Culture' };
+    }
+    
+    // Religious sites
+    if (tags.amenity === 'place_of_worship') {
+      return { type: 'religious', category: 'Religious' };
+    }
+    
+    // Shopping
+    if (tags.amenity === 'marketplace') {
+      return { type: 'market', category: 'Shopping' };
+    }
+    
+    if (tags.shop === 'mall') {
+      return { type: 'mall', category: 'Shopping' };
+    }
+    
+    // Food & drink
+    if (tags.amenity === 'restaurant') {
+      return { type: 'restaurant', category: 'Food & Drink' };
+    }
+    
+    if (tags.amenity === 'cafe') {
+      return { type: 'cafe', category: 'Food & Drink' };
+    }
+    
+    // Transportation
+    if (tags.railway === 'station') {
+      return { type: 'train_station', category: 'Transportation' };
+    }
+    
+    if (tags.amenity === 'ferry_terminal') {
+      return { type: 'ferry_terminal', category: 'Transportation' };
+    }
+    
+    return { type: 'other', category: 'Other' };
+  }
+
+  /**
+   * Format address from OSM tags
+   */
+  private formatAddress(tags: any): string {
+    const parts = [];
+    
+    if (tags['addr:housenumber']) parts.push(tags['addr:housenumber']);
+    if (tags['addr:street']) parts.push(tags['addr:street']);
+    if (tags['addr:postcode']) parts.push(tags['addr:postcode']);
+    if (tags['addr:city']) parts.push(tags['addr:city']);
+    
+    return parts.join(', ') || '';
+  }
+
+  /**
+   * Extract rating from tags (if available)
+   */
+  private extractRating(tags: any): number | undefined {
+    if (tags.stars) {
+      return parseFloat(tags.stars);
+    }
+    return undefined;
+  }
+
+  /**
+   * Save attractions to local storage
+   */
+  private async saveAttractionsToLocal(attractions: Attraction[]): Promise<void> {
+    try {
+      // Group attractions by category
+      const categories = [...new Set(attractions.map(a => a.category))];
+      
+      const attractionsData: AttractionsData = {
+        attractions: attractions,
+        lastUpdated: new Date().toISOString(),
+        totalCount: attractions.length,
+        categories: categories
+      };
+      
+      const attractionsPath = `${FileSystem.documentDirectory}attractions/attractions.json`;
+      await FileSystem.writeAsStringAsync(
+        attractionsPath, 
+        JSON.stringify(attractionsData, null, 2)
+      );
+      
+      // Save attractions by category for faster filtering
+      for (const category of categories) {
+        const categoryAttractions = attractions.filter(a => a.category === category);
+        const categoryPath = `${FileSystem.documentDirectory}attractions/${category.toLowerCase().replace(/\s+/g, '_')}.json`;
+        await FileSystem.writeAsStringAsync(
+          categoryPath,
+          JSON.stringify(categoryAttractions, null, 2)
+        );
+      }
+      
+      console.log('💾 Saved attractions to local storage');
+    } catch (error) {
+      console.error('Failed to save attractions:', error);
+      throw error;
     }
   }
 
@@ -281,29 +682,182 @@ class OfflineMapService {
   }
 
   /**
-   * Get offline map style that uses local tiles
+   * Get offline tile URL template for react-native-maps
    */
-  getOfflineMapStyle(): object {
-    return {
-      version: 8,
-      sources: {
-        'offline-tiles': {
-          type: 'raster',
-          tiles: [`${FileSystem.documentDirectory}tiles/{z}/{x}/{y}.png`],
-          tileSize: 256,
-          minzoom: 10,
-          maxzoom: 16
-        }
-      },
-      layers: [
-        {
-          id: 'offline-tiles',
-          type: 'raster',
-          source: 'offline-tiles',
-          paint: {}
-        }
-      ]
-    };
+  getOfflineTileUrlTemplate(): string {
+    return `file://${FileSystem.documentDirectory}tiles/{z}/{x}/{y}.png`;
+  }
+
+  /**
+   * Check if a specific tile exists locally
+   */
+  async isTileAvailable(x: number, y: number, z: number): Promise<boolean> {
+    try {
+      const tilePath = `${FileSystem.documentDirectory}tiles/${z}/${x}/${y}.png`;
+      const tileInfo = await FileSystem.getInfoAsync(tilePath);
+      return tileInfo.exists;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  /**
+   * Load attractions from local storage
+   */
+  async getLocalAttractions(): Promise<Attraction[]> {
+    try {
+      const attractionsPath = `${FileSystem.documentDirectory}attractions/attractions.json`;
+      const fileInfo = await FileSystem.getInfoAsync(attractionsPath);
+      
+      if (!fileInfo.exists) {
+        return [];
+      }
+      
+      const data = await FileSystem.readAsStringAsync(attractionsPath);
+      const attractionsData: AttractionsData = JSON.parse(data);
+      
+      return attractionsData.attractions;
+    } catch (error) {
+      console.error('Failed to load local attractions:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get attractions by category
+   */
+  async getAttractionsByCategory(category: string): Promise<Attraction[]> {
+    try {
+      const categoryPath = `${FileSystem.documentDirectory}attractions/${category.toLowerCase().replace(/\s+/g, '_')}.json`;
+      const fileInfo = await FileSystem.getInfoAsync(categoryPath);
+      
+      if (!fileInfo.exists) {
+        return [];
+      }
+      
+      const data = await FileSystem.readAsStringAsync(categoryPath);
+      return JSON.parse(data);
+    } catch (error) {
+      console.error('Failed to load attractions by category:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Search attractions by name or type
+   */
+  async searchLocalAttractions(query: string): Promise<Attraction[]> {
+    const attractions = await this.getLocalAttractions();
+    const lowercaseQuery = query.toLowerCase();
+    
+    return attractions.filter(attraction =>
+      attraction.name.toLowerCase().includes(lowercaseQuery) ||
+      attraction.type.toLowerCase().includes(lowercaseQuery) ||
+      attraction.category.toLowerCase().includes(lowercaseQuery) ||
+      (attraction.description && attraction.description.toLowerCase().includes(lowercaseQuery))
+    );
+  }
+
+  /**
+   * Get available categories
+   */
+  async getAvailableCategories(): Promise<string[]> {
+    try {
+      const attractionsPath = `${FileSystem.documentDirectory}attractions/attractions.json`;
+      const fileInfo = await FileSystem.getInfoAsync(attractionsPath);
+      
+      if (!fileInfo.exists) {
+        return [];
+      }
+      
+      const data = await FileSystem.readAsStringAsync(attractionsPath);
+      const attractionsData: AttractionsData = JSON.parse(data);
+      
+      return attractionsData.categories;
+    } catch (error) {
+      console.error('Failed to load categories:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Check if attractions are downloaded
+   */
+  async areAttractionsDownloaded(): Promise<boolean> {
+    try {
+      const attractionsPath = `${FileSystem.documentDirectory}attractions/attractions.json`;
+      const fileInfo = await FileSystem.getInfoAsync(attractionsPath);
+      return fileInfo.exists;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  /**
+   * Get attractions info
+   */
+  async getAttractionsInfo(): Promise<{ count: number; lastUpdated: string; categories: string[] }> {
+    try {
+      const attractionsPath = `${FileSystem.documentDirectory}attractions/attractions.json`;
+      const fileInfo = await FileSystem.getInfoAsync(attractionsPath);
+      
+      if (!fileInfo.exists) {
+        return { count: 0, lastUpdated: '', categories: [] };
+      }
+      
+      const data = await FileSystem.readAsStringAsync(attractionsPath);
+      const attractionsData: AttractionsData = JSON.parse(data);
+      
+      return {
+        count: attractionsData.totalCount,
+        lastUpdated: attractionsData.lastUpdated,
+        categories: attractionsData.categories
+      };
+    } catch (error) {
+      console.error('Failed to get attractions info:', error);
+      return { count: 0, lastUpdated: '', categories: [] };
+    }
+  }
+
+  /**
+   * Get attractions download progress
+   */
+  getAttractionsDownloadProgress(): AttractionDownloadProgress {
+    return { ...this.attractionDownloadProgress };
+  }
+
+  /**
+   * Get offline data status
+   */
+  async getOfflineDataStatus(): Promise<{
+    tilesDownloaded: boolean;
+    attractionsDownloaded: boolean;
+    attractionCount: number;
+    lastUpdated: string;
+    categories: string[];
+  }> {
+    try {
+      const tilesDownloaded = await this.areAmsterdamTilesDownloaded();
+      const attractionsDownloaded = await this.areAttractionsDownloaded();
+      const attractionsInfo = await this.getAttractionsInfo();
+      
+      return {
+        tilesDownloaded,
+        attractionsDownloaded,
+        attractionCount: attractionsInfo.count,
+        lastUpdated: attractionsInfo.lastUpdated,
+        categories: attractionsInfo.categories
+      };
+    } catch (error) {
+      console.error('Error getting offline data status:', error);
+      return {
+        tilesDownloaded: false,
+        attractionsDownloaded: false,
+        attractionCount: 0,
+        lastUpdated: '',
+        categories: []
+      };
+    }
   }
 
   /**
@@ -311,6 +865,26 @@ class OfflineMapService {
    */
   getTilesDirectory(): string {
     return `${FileSystem.documentDirectory}tiles/`;
+  }
+
+  /**
+   * Clear all downloaded attractions
+   */
+  async clearAllAttractions(): Promise<boolean> {
+    try {
+      const attractionsDir = `${FileSystem.documentDirectory}attractions/`;
+      const dirInfo = await FileSystem.getInfoAsync(attractionsDir);
+      
+      if (dirInfo.exists) {
+        await FileSystem.deleteAsync(attractionsDir);
+        console.log('🗑️ Cleared all offline attractions');
+      }
+      
+      return true;
+    } catch (error) {
+      console.error('Error clearing attractions:', error);
+      return false;
+    }
   }
 
   /**
@@ -331,6 +905,48 @@ class OfflineMapService {
       console.error('Error clearing tiles:', error);
       return false;
     }
+  }
+
+  /**
+   * Pause the current download
+   */
+  pauseDownload(): void {
+    if (this.isDownloading) {
+      this.isPaused = true;
+      console.log('⏸️ Download paused');
+    }
+  }
+
+  /**
+   * Resume the paused download
+   */
+  resumeDownload(): void {
+    if (this.isDownloading && this.isPaused) {
+      this.isPaused = false;
+      console.log('▶️ Download resumed');
+    }
+  }
+
+  /**
+   * Check if download is paused
+   */
+  isDownloadPaused(): boolean {
+    return this.isPaused;
+  }
+
+  /**
+   * Cancel the current download
+   */
+  cancelDownload(): void {
+    this.isDownloading = false;
+    this.isPaused = false;
+    this.downloadProgress = {
+      totalTiles: 0,
+      downloadedTiles: 0,
+      progress: 0,
+      isDownloading: false
+    };
+    console.log('❌ Download cancelled');
   }
 }
 
