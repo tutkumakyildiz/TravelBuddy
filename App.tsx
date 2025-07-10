@@ -172,9 +172,9 @@ export default function App() {
               
               // Show user that we're starting the heavy download/initialization
               Alert.alert(
-                'Loading AI Model', 
-                'LocalTravelBuddy is loading the Gemma 3n AI model (2.9GB).\n\nFirst time setup may take 5-10 minutes.\n\nThe app will notify you when ready.',
-                [{ text: 'OK', style: 'default' }]
+                'AI Modeli Yükleniyor', 
+                'LocalTravelBuddy, Gemma 3n AI modelini yüklüyor (2.9GB).\n\nİlk kurulum 5-10 dakika sürebilir.\n\nHazır olduğunda bilgilendirileceksiniz.',
+                [{ text: 'Tamam', style: 'default' }]
               );
               
               // Add comprehensive progress monitoring
@@ -222,9 +222,9 @@ export default function App() {
         setAiInitialized(true);
         console.log('✅ Gemma 3n AI model fully loaded and ready');
         Alert.alert(
-          'AI Ready', 
-          'LocalTravelBuddy AI (Gemma 3n) is now fully loaded and ready!\n\nAll location features are available.',
-          [{ text: 'Great!', style: 'default' }]
+          'AI Hazır', 
+          'LocalTravelBuddy AI (Gemma 3n) tamamen yüklendi ve hazır!\n\nTüm konum özellikleri kullanılabilir.',
+          [{ text: 'Harika!', style: 'default' }]
         );
         return true;
       } else {
@@ -446,20 +446,13 @@ export default function App() {
       
       const aiService = AIService.getInstance();
       
-      // Create detailed query for AI based on attraction data
+      // Create simple query for AI based on attraction data
       let query = '';
       if (clickData.attractionData) {
         const attraction = clickData.attractionData;
-        query = `Tell me about ${attraction.name} in Amsterdam. It's a ${attraction.type} in the ${attraction.category} category. `;
-        if (attraction.description) {
-          query += `Description: ${attraction.description}. `;
-        }
-        if (attraction.address) {
-          query += `Address: ${attraction.address}. `;
-        }
-        query += `Please provide interesting facts, historical information, visitor tips, and recommendations for this location.`;
+        query = `${attraction.name} hakkında tarihi, turistik ve ilginç bilgiler ver.`;
       } else if (clickData.attraction) {
-        query = `Tell me about ${clickData.attraction} in Amsterdam. Please provide interesting facts, historical information, visitor tips, and recommendations for this location.`;
+        query = `${clickData.attraction} hakkında tarihi, turistik ve ilginç bilgiler ver.`;
       }
       
       const response = await aiService.processText(query);
@@ -467,23 +460,57 @@ export default function App() {
       setLastAiResponse(response.text || '');
       
       if (response.error) {
-        Alert.alert('Error', response.error);
+        Alert.alert('Hata', response.error);
       } else {
         Alert.alert(
-          clickData.attraction ? `🎯 ${clickData.attraction}` : 'Attraction Info',
-          `${response.text || 'No information available'}`,
-          [{ text: 'Great!', style: 'default' }]
+          clickData.attraction ? `🎯 ${clickData.attraction}` : 'Mekan Bilgisi',
+          `${response.text || 'Bilgi bulunamadı'}`,
+          [{ text: 'Harika!', style: 'default' }]
         );
       }
     } catch (error) {
       console.error('Error processing attraction query:', error);
-      Alert.alert('Error', 'Failed to process attraction query. Please try again.');
+      Alert.alert('Hata', 'Mekan bilgisi alınırken bir hata oluştu. Lütfen tekrar deneyin.');
     } finally {
       setIsProcessingLocation(false);
     }
   };
 
-
+  // Helper function to parse formatted text with bold markers
+  const parseFormattedText = (text: string): Array<{ text: string; bold: boolean }> => {
+    const parts: Array<{ text: string; bold: boolean }> = [];
+    const lines = text.split('\n');
+    
+    for (const line of lines) {
+      // Handle bold text marked with **text**
+      const boldRegex = /\*\*(.*?)\*\*/g;
+      let lastIndex = 0;
+      let match;
+      
+      while ((match = boldRegex.exec(line)) !== null) {
+        // Add text before the bold part
+        if (match.index > lastIndex) {
+          parts.push({ text: line.substring(lastIndex, match.index), bold: false });
+        }
+        
+        // Add the bold part
+        parts.push({ text: match[1], bold: true });
+        lastIndex = match.index + match[0].length;
+      }
+      
+      // Add remaining text
+      if (lastIndex < line.length) {
+        parts.push({ text: line.substring(lastIndex), bold: false });
+      }
+      
+      // Add newline if not the last line
+      if (line !== lines[lines.length - 1]) {
+        parts.push({ text: '\n', bold: false });
+      }
+    }
+    
+    return parts;
+  };
 
   return (
     <View style={styles.container}>
@@ -775,10 +802,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.8)',
     padding: 12,
     borderRadius: 8,
-    maxHeight: 120,
+    maxHeight: 300,
   },
   responseScrollView: {
-    maxHeight: 96,
+    maxHeight: 264,
   },
   responseText: {
     color: '#ffffff',

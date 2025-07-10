@@ -311,7 +311,7 @@ class AIService {
       const messages: RNLlamaOAICompatibleMessage[] = [
         {
           role: 'system',
-          content: 'You are a helpful AI travel assistant. Provide concise, relevant travel advice. Keep responses under 200 words for mobile optimization.'
+          content: 'Sen bir uzman rehbersin. Yerler hakkında tarihi, turistik ve ilginç bilgiler verirsin. Cevaplarını 200 kelime altında tut.'
         },
         {
           role: 'user',
@@ -348,86 +348,25 @@ class AIService {
       if (error.message?.includes('memory') || error.message?.includes('OutOfMemory')) {
         return { 
           error: 'Memory limit exceeded',
-          text: 'I\'m experiencing memory constraints. Please try a shorter question or restart the app.'
+          text: 'Bellek sınırı aşıldı. Lütfen daha kısa bir soru deneyin veya uygulamayı yeniden başlatın.'
         };
       }
       
       if (error.message?.includes('timeout')) {
         return { 
           error: 'Processing timeout',
-          text: 'Processing took too long. Please try a simpler question.'
+          text: 'İşleme çok uzun sürdü. Lütfen daha basit bir soru deneyin.'
         };
       }
       
       return { 
         error: `Processing failed: ${error.message}`,
-        text: 'Sorry, I encountered an error while processing your request. Please try again.'
+        text: 'Üzgünüm, isteğinizi işlerken bir hata oluştu. Lütfen tekrar deneyin.'
       };
     }
   }
 
   // Note: Audio and image processing removed as this is a text-only model
-
-  /**
-   * Generate travel recommendations with GGUF model inference
-   */
-  async generateTravelRecommendations(location: string, preferences?: string[]): Promise<GemmaResponse> {
-    if (!this.isInitialized || !this.llamaContext) {
-      return { error: 'AI Service not initialized' };
-    }
-
-    try {
-      const preferencesText = preferences ? ` with preferences: ${preferences.join(', ')}` : '';
-      const prompt = `As a knowledgeable travel assistant, provide comprehensive travel recommendations for ${location}${preferencesText}. Include suggestions for:
-      1. Must-visit attractions and landmarks
-      2. Local cuisine and dining recommendations
-      3. Cultural experiences and activities
-      4. Practical travel tips
-      5. Best times to visit
-      
-      Keep your response concise but informative.`;
-      
-      return await this.processText(prompt);
-    } catch (error) {
-      console.error('❌ Error generating travel recommendations:', error);
-      return { 
-        error: 'Failed to generate travel recommendations',
-        text: 'Sorry, I encountered an error while generating travel recommendations. Please try again.'
-      };
-    }
-  }
-
-  /**
-   * Process location-based query with coordinates
-   */
-  async processLocationQuery(latitude: number, longitude: number, placeName?: string): Promise<GemmaResponse> {
-    if (!this.isInitialized || !this.llamaContext) {
-      return { error: 'AI Service not initialized' };
-    }
-
-    try {
-      const locationDescription = placeName ? `${placeName} (${latitude}, ${longitude})` : `coordinates ${latitude}, ${longitude}`;
-      
-      const prompt = `As a knowledgeable travel assistant, provide information about the location at ${locationDescription}. Include:
-      1. What are the notable attractions or landmarks in this area?
-      2. What are the local dining recommendations and specialties?
-      3. What cultural experiences or activities are available?
-      4. What are some practical travel tips for this location?
-      5. What makes this place special or unique?
-      
-      Keep your response concise but informative, focusing on the most relevant travel information.`;
-      
-      console.log('🗺️ Processing location query:', locationDescription);
-      
-      return await this.processText(prompt);
-    } catch (error) {
-      console.error('❌ Error processing location query:', error);
-      return { 
-        error: 'Failed to process location query',
-        text: 'Sorry, I encountered an error while processing your location query. Please try again.'
-      };
-    }
-  }
 
   /**
    * Get model information
