@@ -23,12 +23,14 @@ interface MapComponentProps {
     longitude: number;
     placeName?: string;
   };
+  forceViewMode?: 'current' | 'amsterdam' | null;
 }
 
 const MapComponent: React.FC<MapComponentProps> = ({ 
   style, 
   onMapPress, 
-  currentLocation 
+  currentLocation,
+  forceViewMode
 }) => {
   const webViewRef = useRef<WebView>(null);
   const [userLocation, setUserLocation] = useState<Location.LocationObject | null>(null);
@@ -47,6 +49,11 @@ const MapComponent: React.FC<MapComponentProps> = ({
     categories: []
   });
   const [isZooming, setIsZooming] = useState(false);
+
+  
+  // NEW: View toggle state
+  const [viewMode, setViewMode] = useState<'current' | 'amsterdam'>('current');
+  const [isViewModeToggling, setIsViewModeToggling] = useState(false);
   
   // Amsterdam center coordinates as default
   const amsterdamCenter = { latitude: 52.3676, longitude: 4.9041 };
@@ -55,6 +62,24 @@ const MapComponent: React.FC<MapComponentProps> = ({
     console.log('🗺️ MapComponent initialized with WebView + OpenStreetMap');
     initializeMap();
   }, []);
+
+  // NEW: Effect to handle view mode changes
+  useEffect(() => {
+    if (mapLoaded && !isViewModeToggling) {
+      updateMapCenter();
+    }
+  }, [viewMode, mapLoaded, currentLocation, userLocation, offlineDataStatus]);
+
+  // NEW: Effect to handle forceViewMode prop changes
+  useEffect(() => {
+    if (forceViewMode && forceViewMode !== viewMode) {
+      setViewMode(forceViewMode);
+      console.log('🗺️ View mode forced to:', forceViewMode);
+    }
+  }, [forceViewMode]);
+
+  // NEW: Create a key that changes when attractions are loaded to force WebView reload
+  const webViewKey = `map-${viewMode}-${attractions.length}`;
 
   const initializeMap = async () => {
     try {
@@ -98,6 +123,11 @@ const MapComponent: React.FC<MapComponentProps> = ({
       setOfflineDataStatus(status);
       setCategories(status.categories);
       console.log('📊 Offline data status:', status);
+      
+      // NEW: Auto-switch to Amsterdam view if Amsterdam data is available and user hasn't manually changed view
+      if (status.attractionsDownloaded && status.attractionCount > 0 && viewMode === 'current') {
+        console.log('🗺️ Amsterdam data detected, suggesting Amsterdam view');
+      }
     } catch (error) {
       console.error('Failed to load offline data status:', error);
     }
@@ -110,6 +140,10 @@ const MapComponent: React.FC<MapComponentProps> = ({
       setAttractions(localAttractions);
       setAttractionsLoaded(true);
       console.log(`🎯 Loaded ${localAttractions.length} attractions from local storage`);
+      
+      if (localAttractions.length > 0) {
+        console.log('🗺️ Sample attraction:', localAttractions[0].name, 'at', localAttractions[0].latitude, localAttractions[0].longitude);
+      }
     } catch (error) {
       console.error('Failed to load attractions:', error);
     }
@@ -157,6 +191,64 @@ const MapComponent: React.FC<MapComponentProps> = ({
       onMapPress(coordinates);
     }
   };
+
+  // NEW: Toggle between current location and Amsterdam views
+  const toggleViewMode = () => {
+    if (isViewModeToggling) return;
+    
+    setIsViewModeToggling(true);
+    
+    if (viewMode === 'current') {
+      // Switch to Amsterdam
+      if (offlineDataStatus.attractionsDownloaded) {
+        setViewMode('amsterdam');
+        console.log('🗺️ Switching to Amsterdam view');
+      } else {
+        Alert.alert(
+          'Amsterdam Data Not Available',
+          'Please download Amsterdam map data first to view Amsterdam attractions.',
+          [{ text: 'OK' }]
+        );
+      }
+    } else {
+      // Switch to current location
+      setViewMode('current');
+      console.log('🗺️ Switching to current location view');
+    }
+    
+    setTimeout(() => setIsViewModeToggling(false), 300);
+  };
+
+  // NEW: Update map center based on view mode
+  const updateMapCenter = () => {
+    if (webViewRef.current && mapLoaded) {
+      const center = getActiveCenter();
+      const message = JSON.stringify({
+        action: 'updateCenter',
+        latitude: center.latitude,
+        longitude: center.longitude,
+        zoom: viewMode === 'amsterdam' ? 13 : 14
+      });
+      webViewRef.current.postMessage(message);
+      console.log('📍 Updated map center to:', center);
+    }
+  };
+
+  // NEW: Get active center based on view mode
+  const getActiveCenter = () => {
+    if (viewMode === 'amsterdam') {
+      return amsterdamCenter;
+    }
+    
+    if (currentLocation) {
+      return { latitude: currentLocation.latitude, longitude: currentLocation.longitude };
+    } else if (userLocation) {
+      return { latitude: userLocation.coords.latitude, longitude: userLocation.coords.longitude };
+    } else {
+      return amsterdamCenter;
+    }
+  };
+
 
 
 
@@ -228,13 +320,8 @@ const MapComponent: React.FC<MapComponentProps> = ({
 
   // Generate the initial map position
   const getInitialCenter = () => {
-    if (currentLocation) {
-      return { latitude: currentLocation.latitude, longitude: currentLocation.longitude };
-    } else if (userLocation) {
-      return { latitude: userLocation.coords.latitude, longitude: userLocation.coords.longitude };
-    } else {
-      return amsterdamCenter;
-    }
+    // NEW: Use active center based on view mode
+    return getActiveCenter();
   };
 
   // Handle messages from WebView
@@ -242,7 +329,8 @@ const MapComponent: React.FC<MapComponentProps> = ({
     try {
       const data = JSON.parse(event.nativeEvent.data);
       
-      if (data.action === 'mapClick') {
+      if (data.action === 'longPress') {
+        // Handle long press for AI queries
         const clickData = {
           latitude: data.latitude,
           longitude: data.longitude,
@@ -272,18 +360,52 @@ const MapComponent: React.FC<MapComponentProps> = ({
         body { margin: 0; padding: 0; }
         #map { height: 100vh; width: 100vw; }
         .marker-popup { font-size: 14px; }
-        .attraction-marker { 
-          background-color: #ff6b6b; 
-          color: white; 
-          border: 2px solid #ff4757; 
-          border-radius: 50%; 
-          text-align: center;
+        
+        /* Google Maps style attraction circles */
+        .attraction-circle {
+          background-color: #4285f4;
+          border: 3px solid #ffffff;
+          border-radius: 50%;
+          box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+          cursor: pointer;
+          transition: all 0.2s ease;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: white;
           font-weight: bold;
-          font-size: 12px;
-          width: 30px;
-          height: 30px;
-          line-height: 26px;
+          font-size: 14px;
         }
+        
+        .attraction-circle:hover {
+          background-color: #1a73e8;
+          transform: scale(1.1);
+          box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+        }
+        
+        /* Different colors for different categories */
+        .attraction-circle.culture { background-color: #9c27b0; }
+        .attraction-circle.tourism { background-color: #ff9800; }
+        .attraction-circle.historic { background-color: #8bc34a; }
+        .attraction-circle.nature { background-color: #4caf50; }
+        .attraction-circle.entertainment { background-color: #e91e63; }
+        .attraction-circle.religious { background-color: #795548; }
+        .attraction-circle.shopping { background-color: #2196f3; }
+        .attraction-circle.food { background-color: #ff5722; }
+        .attraction-circle.transportation { background-color: #607d8b; }
+        
+        /* AI processing visual feedback */
+        .attraction-circle.ai-processing {
+          background-color: #ff9800 !important;
+          animation: pulse-ai-processing 1s infinite;
+        }
+        
+        @keyframes pulse-ai-processing {
+          0% { transform: scale(1); }
+          50% { transform: scale(1.3); }
+          100% { transform: scale(1); }
+        }
+        
         .click-indicator {
           position: absolute;
           width: 20px;
@@ -294,6 +416,7 @@ const MapComponent: React.FC<MapComponentProps> = ({
           z-index: 1000;
           animation: pulse 1s infinite;
         }
+        
         @keyframes pulse {
           0% { transform: scale(1); opacity: 1; }
           50% { transform: scale(1.5); opacity: 0.5; }
@@ -319,21 +442,53 @@ const MapComponent: React.FC<MapComponentProps> = ({
           maxZoom: 18
         }).addTo(map);
         
+        // Interaction variables
+        let isZooming = false;
+        
+        // Track zoom operations to prevent accidental clicks
+        map.on('zoomstart', function() {
+          isZooming = true;
+          console.log('Zoom started - disabling clicks');
+        });
+        
+        map.on('zoomend', function() {
+          // Keep zooming flag for a short time to prevent accidental clicks
+          setTimeout(() => {
+            isZooming = false;
+            console.log('Zoom ended - enabling clicks');
+          }, 300);
+        });
+        
         // Attractions from local storage
         const attractions = ${JSON.stringify(attractions)};
+        console.log('🎯 Attractions loaded in map:', attractions.length);
         
-        // Add attraction markers
-        attractions.forEach(attraction => {
-          const markerIcon = L.divIcon({
-            html: getCategoryIcon(attraction.category),
-            className: 'attraction-marker',
-            iconSize: [30, 30],
-            iconAnchor: [15, 15],
-            popupAnchor: [0, -15]
+        // Add attraction circles (Google Maps style) - only if attractions exist
+        if (attractions && attractions.length > 0) {
+          console.log('🗺️ Adding', attractions.length, 'attractions to map');
+          attractions.forEach(attraction => {
+          // Create circle marker instead of icon marker
+          const circleMarker = L.circleMarker([attraction.latitude, attraction.longitude], {
+            radius: 12,
+            fillColor: getCategoryColor(attraction.category),
+            color: '#ffffff',
+            weight: 3,
+            fillOpacity: 0.9,
+            className: 'attraction-circle-leaflet'
+          }).addTo(map);
+          
+          // Add category icon inside the circle
+          const categoryIcon = getCategoryIcon(attraction.category);
+          const divIcon = L.divIcon({
+            html: \`<div class="attraction-circle \${getCategoryClass(attraction.category)}" style="width: 24px; height: 24px; font-size: 12px;">\${categoryIcon}</div>\`,
+            className: 'attraction-circle-container',
+            iconSize: [24, 24],
+            iconAnchor: [12, 12],
+            popupAnchor: [0, -12]
           });
           
-          const marker = L.marker([attraction.latitude, attraction.longitude], {
-            icon: markerIcon
+          const iconMarker = L.marker([attraction.latitude, attraction.longitude], {
+            icon: divIcon
           }).addTo(map);
           
           const popupContent = \`
@@ -346,36 +501,114 @@ const MapComponent: React.FC<MapComponentProps> = ({
               \${attraction.openingHours ? \`<p><strong>Hours:</strong> \${attraction.openingHours}</p>\` : ''}
               \${attraction.phone ? \`<p><strong>Phone:</strong> \${attraction.phone}</p>\` : ''}
               \${attraction.website ? \`<p><strong>Website:</strong> <a href="\${attraction.website}" target="_blank">\${attraction.website}</a></p>\` : ''}
-              <button onclick="askAI('\${attraction.name}', '\${attraction.category}', '\${attraction.type}', '\${attraction.description || ''}', '\${attraction.address || ''}', \${attraction.latitude}, \${attraction.longitude})" 
-                      style="background-color: #007bff; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-top: 10px;">
-                Ask AI about this place
-              </button>
+
             </div>
           \`;
           
-          marker.bindPopup(popupContent);
+          // Bind popup to both markers
+          circleMarker.bindPopup(popupContent);
+          iconMarker.bindPopup(popupContent);
           
-          // Handle attraction marker clicks
-          marker.on('click', function(e) {
-            // Send attraction click to React Native
-            window.ReactNativeWebView.postMessage(JSON.stringify({
-              action: 'mapClick',
-              latitude: attraction.latitude,
-              longitude: attraction.longitude,
-              attraction: attraction.name,
-              attractionData: {
-                name: attraction.name,
-                category: attraction.category,
-                type: attraction.type,
-                description: attraction.description || '',
-                address: attraction.address || '',
-                openingHours: attraction.openingHours || '',
-                phone: attraction.phone || '',
-                website: attraction.website || ''
+          // Handle attraction marker interactions
+          function handleAttractionTouch(e, marker) {
+            e.originalEvent.preventDefault();
+            e.originalEvent.stopPropagation();
+            
+            if (isZooming) {
+              console.log('Ignoring touch during zoom');
+              return;
+            }
+            
+            // Check if this is a double tap
+            const now = Date.now();
+            const timeSinceLastTap = now - (marker.lastTapTime || 0);
+            
+            if (timeSinceLastTap < 300) { // 300ms window for double tap
+              console.log('Double tap detected for:', attraction.name);
+              
+              // Add visual feedback for AI query
+              const markerElement = marker.getElement();
+              if (markerElement) {
+                markerElement.classList.add('ai-processing');
+                setTimeout(() => {
+                  markerElement.classList.remove('ai-processing');
+                }, 1000);
               }
-            }));
-          });
+              
+              // Send AI query
+              window.ReactNativeWebView.postMessage(JSON.stringify({
+                action: 'longPress', // Keep same action name for compatibility
+                latitude: attraction.latitude,
+                longitude: attraction.longitude,
+                attraction: attraction.name,
+                attractionData: {
+                  name: attraction.name,
+                  category: attraction.category,
+                  type: attraction.type,
+                  description: attraction.description || '',
+                  address: attraction.address || '',
+                  openingHours: attraction.openingHours || '',
+                  phone: attraction.phone || '',
+                  website: attraction.website || ''
+                }
+              }));
+              
+              // Reset tap timer
+              marker.lastTapTime = 0;
+            } else {
+              // First tap - show popup after short delay to allow for double tap
+              marker.lastTapTime = now;
+              setTimeout(() => {
+                if (now === marker.lastTapTime) {
+                  // Single tap - show popup
+                  console.log('Single tap detected for:', attraction.name);
+                  marker.openPopup();
+                }
+              }, 300);
+            }
+          }
+          
+          // Add click event listeners for both markers
+          iconMarker.on('click', (e) => handleAttractionTouch(e, iconMarker));
+          circleMarker.on('click', (e) => handleAttractionTouch(e, circleMarker));
         });
+        } else {
+          console.log('🎯 No attractions to display on map');
+        }
+        
+        // Function to get category color
+        function getCategoryColor(category) {
+          const colorMap = {
+            'Culture': '#9c27b0',
+            'Tourism': '#ff9800',
+            'Historic': '#8bc34a',
+            'Nature': '#4caf50',
+            'Entertainment': '#e91e63',
+            'Religious': '#795548',
+            'Shopping': '#2196f3',
+            'Food & Drink': '#ff5722',
+            'Transportation': '#607d8b',
+            'Other': '#4285f4'
+          };
+          return colorMap[category] || '#4285f4';
+        }
+        
+        // Function to get category class
+        function getCategoryClass(category) {
+          const classMap = {
+            'Culture': 'culture',
+            'Tourism': 'tourism',
+            'Historic': 'historic',
+            'Nature': 'nature',
+            'Entertainment': 'entertainment',
+            'Religious': 'religious',
+            'Shopping': 'shopping',
+            'Food & Drink': 'food',
+            'Transportation': 'transportation',
+            'Other': 'other'
+          };
+          return classMap[category] || 'other';
+        }
         
         // Function to get category icon
         function getCategoryIcon(category) {
@@ -394,26 +627,6 @@ const MapComponent: React.FC<MapComponentProps> = ({
           return iconMap[category] || '📍';
         }
         
-        // Function to ask AI about an attraction
-        function askAI(name, category, type, description, address, latitude, longitude) {
-          window.ReactNativeWebView.postMessage(JSON.stringify({
-            action: 'mapClick',
-            latitude: latitude,
-            longitude: longitude,
-            attraction: name,
-            attractionData: {
-              name: name,
-              category: category,
-              type: type,
-              description: description,
-              address: address,
-              openingHours: '',
-              phone: '',
-              website: ''
-            }
-          }));
-        }
-        
         // Add location markers
         let currentLocationMarker = null;
         let userLocationMarker = null;
@@ -430,28 +643,48 @@ const MapComponent: React.FC<MapComponentProps> = ({
             .bindPopup('<div class="marker-popup"><b>Your Location</b><br/>GPS Location</div>');
         }
         
-        // Handle map clicks
+        // Handle map double tap for general locations
+        let lastMapTapTime = 0;
+        let mapClickIndicator = null;
+        
         map.on('click', function(e) {
-          // Add visual click indicator
-          const clickIndicator = L.divIcon({
-            className: 'click-indicator',
-            iconSize: [20, 20],
-            iconAnchor: [10, 10]
-          });
+          if (isZooming) return;
           
-          const clickMarker = L.marker([e.latlng.lat, e.latlng.lng], { icon: clickIndicator })
-            .addTo(map);
+          const now = Date.now();
+          const timeSinceLastTap = now - lastMapTapTime;
           
-          // Remove click indicator after 2 seconds
-          setTimeout(() => {
-            map.removeLayer(clickMarker);
-          }, 2000);
-          
-          window.ReactNativeWebView.postMessage(JSON.stringify({
-            action: 'mapClick',
-            latitude: e.latlng.lat,
-            longitude: e.latlng.lng
-          }));
+          if (timeSinceLastTap < 300) { // 300ms window for double tap
+            console.log('Map double tap detected');
+            
+            // Add visual indicator
+            const clickIndicator = L.divIcon({
+              className: 'click-indicator',
+              iconSize: [20, 20],
+              iconAnchor: [10, 10]
+            });
+            
+            mapClickIndicator = L.marker([e.latlng.lat, e.latlng.lng], { icon: clickIndicator })
+              .addTo(map);
+            
+            // Send AI query for general location
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+              action: 'longPress', // Keep same action name for compatibility
+              latitude: e.latlng.lat,
+              longitude: e.latlng.lng
+            }));
+            
+            // Remove indicator after 2 seconds
+            setTimeout(() => {
+              if (mapClickIndicator) {
+                map.removeLayer(mapClickIndicator);
+                mapClickIndicator = null;
+              }
+            }, 2000);
+            
+            lastMapTapTime = 0;
+          } else {
+            lastMapTapTime = now;
+          }
         });
         
         // Handle messages from React Native
@@ -493,6 +726,9 @@ const MapComponent: React.FC<MapComponentProps> = ({
               } else {
                 console.log('Already at minimum zoom level');
               }
+            } else if (data.action === 'updateCenter') {
+              console.log('Updating map center to:', data.latitude, data.longitude, 'with zoom:', data.zoom);
+              map.setView([data.latitude, data.longitude], data.zoom);
             }
           } catch (error) {
             console.error('Error parsing WebView message:', error);
@@ -535,6 +771,7 @@ const MapComponent: React.FC<MapComponentProps> = ({
   return (
     <View style={[styles.container, style]}>
       <WebView
+        key={webViewKey}
         ref={webViewRef}
         source={{ html: mapHTML }}
         style={styles.webView}
@@ -551,6 +788,32 @@ const MapComponent: React.FC<MapComponentProps> = ({
           </View>
         )}
       />
+
+
+
+      {/* View Mode Toggle (Clickable) */}
+      <TouchableOpacity
+        style={[
+          styles.viewModeIndicator,
+          isViewModeToggling && styles.viewModeDisabled
+        ]}
+        onPress={toggleViewMode}
+        disabled={isViewModeToggling}
+      >
+        <Text style={styles.viewModeText}>
+          {viewMode === 'amsterdam' ? '🇳🇱 Amsterdam' : '📍 My Location'}
+        </Text>
+        {offlineDataStatus.attractionsDownloaded && (
+          <Text style={styles.viewModeSubText}>
+            {viewMode === 'amsterdam' 
+              ? `${offlineDataStatus.attractionCount} attractions` 
+              : 'Tap to see Amsterdam'
+            }
+          </Text>
+        )}
+      </TouchableOpacity>
+
+      
 
       {/* Attractions Modal */}
       <Modal
@@ -702,27 +965,33 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#666',
   },
-  controlsOverlay: {
+
+  viewModeIndicator: {
     position: 'absolute',
     top: 60,
-    right: 20,
-    flexDirection: 'column',
-    gap: 10,
-  },
-  locationButton: {
-    backgroundColor: '#007bff',
-    borderRadius: 25,
-    width: 50,
-    height: 50,
-    justifyContent: 'center',
-    alignItems: 'center',
+    left: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    borderRadius: 20,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
     elevation: 5,
   },
-  buttonDisabled: {
-    backgroundColor: '#cccccc',
+  viewModeText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  viewModeSubText: {
+    color: '#ccc',
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 2,
+  },
+  viewModeDisabled: {
     opacity: 0.6,
   },
   debugInfo: {
@@ -870,6 +1139,7 @@ const styles = StyleSheet.create({
     color: '#888',
     fontStyle: 'italic',
   },
+
 });
 
 export default MapComponent; 

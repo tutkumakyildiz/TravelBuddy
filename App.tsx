@@ -30,6 +30,9 @@ export default function App() {
   const [locationLoading, setLocationLoading] = useState(true);
   const [locationError, setLocationError] = useState<string | null>(null);
   
+  // Map view mode control
+  const [forceViewMode, setForceViewMode] = useState<'current' | 'amsterdam' | null>(null);
+  
   const locationService = LocationService.getInstance();
   const offlineMapService = OfflineMapService.getInstance();
 
@@ -343,9 +346,12 @@ export default function App() {
               if (success) {
                 setMapDownloaded(true);
                 Alert.alert(
-                  'Map Downloaded!',
-                  'Amsterdam map and attractions are now available offline. You can now explore the city!',
-                  [{ text: 'Great!' }]
+                  'Amsterdam Map Downloaded! 🇳🇱',
+                  'Amsterdam map and attractions are now available offline!\n\n🗺️ How to access Amsterdam:\n• Use the 🇳🇱 button (bottom-right)\n• Or tap the indicator at top-left of map\n\nYou can now explore Amsterdam offline!',
+                  [{ text: 'Switch to Amsterdam View', onPress: () => {
+                    setForceViewMode('amsterdam');
+                    setTimeout(() => setForceViewMode(null), 1000);
+                  } }, { text: 'Stay Here', style: 'cancel' }]
                 );
               } else {
                 Alert.alert('Download Failed', 'Failed to download map data. Please try again.');
@@ -407,46 +413,26 @@ export default function App() {
   };
 
   const handleMapPress = async (clickData: { latitude: number; longitude: number; attraction?: string; attractionData?: any }) => {
-    console.log('🗺️ Map pressed at coordinates:', clickData);
+    console.log('🗺️ Map long pressed at coordinates:', clickData);
     
-    // Show immediate feedback
-    const locationText = clickData.attraction 
-      ? `Analyzing ${clickData.attraction}...`
-      : `Analyzing the location you clicked on the map...\n\nCoordinates: ${clickData.latitude.toFixed(4)}, ${clickData.longitude.toFixed(4)}`;
-    
-    Alert.alert(
-      'AI Processing Location',
-      locationText,
-      [{ text: 'OK', style: 'default' }]
-    );
+
 
     // Lazy initialization for map AI features
     if (!aiInitialized && !initializationAttempted) {
       console.log('🔄 User requested map AI feature - starting lazy initialization...');
       const initialized = await initializeAILazily();
       if (!initialized) {
-        Alert.alert(
-          'AI Required', 
-          'Failed to initialize AI. Please try again.',
-          [{ text: 'Retry', onPress: () => handleMapPress(clickData) }]
-        );
         return;
       }
     }
 
-    // If AI is still loading, show status and wait
+    // If AI is still loading, return
     if (aiLoading) {
-      Alert.alert(
-        'AI Loading', 
-        'AI model is still loading in the background. Please wait a moment and try again.',
-        [{ text: 'OK', style: 'default' }]
-      );
       return;
     }
 
     // AI must be ready to proceed
     if (!aiInitialized) {
-      Alert.alert('AI Required', 'AI must be initialized to use location features.');
       return;
     }
 
@@ -504,6 +490,7 @@ export default function App() {
         <MapComponent 
           style={styles.map}
           currentLocation={currentLocation}
+          forceViewMode={forceViewMode}
           onMapPress={(clickData) => {
             console.log('🗺️ Map pressed at:', clickData);
             handleMapPress(clickData);
@@ -519,19 +506,11 @@ export default function App() {
           </View>
         )}
 
-                {/* Processing Status Display */}
-        {isProcessingLocation && (
-          <View style={styles.processingOverlay}>
-            <ActivityIndicator size="large" color="#007AFF" />
-            <Text style={styles.processingText}>🗺️ Processing location...</Text>
-            <Text style={styles.processingSubtext}>Getting travel information</Text>
-          </View>
-        )}
+        
 
         {/* Download Status Bar */}
         {(!mapDownloaded || !aiInitialized) && (
           <View style={styles.downloadStatusBar}>
-            <Text style={styles.downloadStatusTitle}>Setup Required</Text>
             
             {/* Map Download Status */}
             {!mapDownloaded && (
@@ -549,9 +528,7 @@ export default function App() {
                     <Text style={styles.downloadStatusName}>
                       {mapLoading ? (mapPaused ? 'Resume Map' : 'Pause Map') : 'Download Map'}
                     </Text>
-                    <Text style={styles.downloadStatusSubtext}>
-                      {mapLoading ? `${(mapProgress * 100).toFixed(0)}% downloaded` : 'Amsterdam with attractions'}
-                    </Text>
+
                   </View>
                 </View>
                 {mapLoading && !mapPaused && (
@@ -578,9 +555,7 @@ export default function App() {
                     <Text style={styles.downloadStatusName}>
                       {aiLoading ? (aiPaused ? 'Resume AI' : 'Pause AI') : 'Download AI'}
                     </Text>
-                    <Text style={styles.downloadStatusSubtext}>
-                      {aiLoading ? `${(aiProgress * 100).toFixed(0)}% downloaded` : 'Gemma 3n AI Model'}
-                    </Text>
+
                   </View>
                 </View>
                 {aiLoading && !aiPaused && (
@@ -591,6 +566,28 @@ export default function App() {
               </TouchableOpacity>
             )}
           </View>
+        )}
+
+        {/* Amsterdam View Button - Show when map is downloaded */}
+        {mapDownloaded && (
+          <TouchableOpacity 
+            style={[
+              styles.floatingButton,
+              styles.amsterdamButton,
+            ]} 
+            onPress={() => {
+              // Force the map to show Amsterdam
+              console.log('🇳🇱 Switching to Amsterdam view...');
+              setForceViewMode('amsterdam');
+              
+              // Reset after a short delay so user can toggle again
+              setTimeout(() => {
+                setForceViewMode(null);
+              }, 1000);
+            }}
+          >
+            <Text style={styles.amsterdamButtonText}>🇳🇱</Text>
+          </TouchableOpacity>
         )}
 
         {/* Location Refresh Button - Only show when ready */}
@@ -956,5 +953,14 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
     elevation: 5,
+  },
+  amsterdamButton: {
+    backgroundColor: 'rgba(255, 102, 0, 0.9)',
+    bottom: 90,
+  },
+  amsterdamButtonText: {
+    fontSize: 24,
+    color: '#fff',
+    fontWeight: 'bold',
   },
 });
