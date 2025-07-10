@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, View, TouchableOpacity, Alert, Text, ActivityIndicator } from 'react-native';
+import { StyleSheet, View, TouchableOpacity, Alert, Text, ActivityIndicator, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AIService from './services/AIService';
 import MapComponent from './components/MapComponent';
@@ -413,9 +413,13 @@ export default function App() {
   };
 
   const handleMapPress = async (clickData: { latitude: number; longitude: number; attraction?: string; attractionData?: any }) => {
-    console.log('🗺️ Map long pressed at coordinates:', clickData);
+    console.log('🗺️ Map pressed at coordinates:', clickData);
     
-
+    // Only process AI if there's actually an attraction clicked
+    if (!clickData.attractionData && !clickData.attraction) {
+      console.log('ℹ️ No attraction data - skipping AI processing');
+      return;
+    }
 
     // Lazy initialization for map AI features
     if (!aiInitialized && !initializationAttempted) {
@@ -438,11 +442,11 @@ export default function App() {
 
     try {
       setIsProcessingLocation(true);
-      console.log('🗺️ Processing clicked location query...');
+      console.log('🗺️ Processing clicked attraction query...');
       
       const aiService = AIService.getInstance();
       
-      // Create detailed query for AI if attraction data is available
+      // Create detailed query for AI based on attraction data
       let query = '';
       if (clickData.attractionData) {
         const attraction = clickData.attractionData;
@@ -456,8 +460,6 @@ export default function App() {
         query += `Please provide interesting facts, historical information, visitor tips, and recommendations for this location.`;
       } else if (clickData.attraction) {
         query = `Tell me about ${clickData.attraction} in Amsterdam. Please provide interesting facts, historical information, visitor tips, and recommendations for this location.`;
-      } else {
-        query = `Tell me about the location at coordinates ${clickData.latitude.toFixed(4)}, ${clickData.longitude.toFixed(4)} in Amsterdam. What's interesting about this area?`;
       }
       
       const response = await aiService.processText(query);
@@ -468,14 +470,14 @@ export default function App() {
         Alert.alert('Error', response.error);
       } else {
         Alert.alert(
-          clickData.attraction ? `🎯 ${clickData.attraction}` : 'Location Analysis',
+          clickData.attraction ? `🎯 ${clickData.attraction}` : 'Attraction Info',
           `${response.text || 'No information available'}`,
           [{ text: 'Great!', style: 'default' }]
         );
       }
     } catch (error) {
-      console.error('Error processing location query:', error);
-      Alert.alert('Error', 'Failed to process location query. Please try again.');
+      console.error('Error processing attraction query:', error);
+      Alert.alert('Error', 'Failed to process attraction query. Please try again.');
     } finally {
       setIsProcessingLocation(false);
     }
@@ -500,9 +502,15 @@ export default function App() {
         {/* Last AI Response Display */}
         {lastAiResponse && !isProcessingLocation && (
           <View style={styles.responseOverlay}>
-            <Text style={styles.responseText} numberOfLines={3}>
-              🤖 {lastAiResponse}
-            </Text>
+            <ScrollView style={styles.responseScrollView} showsVerticalScrollIndicator={true}>
+              <Text style={styles.responseText}>
+                🤖 {parseFormattedText(lastAiResponse).map((part, index) => (
+                  <Text key={index} style={part.bold ? styles.boldText : null}>
+                    {part.text}
+                  </Text>
+                ))}
+              </Text>
+            </ScrollView>
           </View>
         )}
 
@@ -767,11 +775,18 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.8)',
     padding: 12,
     borderRadius: 8,
+    maxHeight: 120,
+  },
+  responseScrollView: {
+    maxHeight: 96,
   },
   responseText: {
     color: '#ffffff',
     fontSize: 12,
     lineHeight: 16,
+  },
+  boldText: {
+    fontWeight: 'bold',
   },
   controlPanel: {
     position: 'absolute',

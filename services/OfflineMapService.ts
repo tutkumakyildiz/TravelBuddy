@@ -716,7 +716,10 @@ class OfflineMapService {
       const data = await FileSystem.readAsStringAsync(attractionsPath);
       const attractionsData: AttractionsData = JSON.parse(data);
       
-      return attractionsData.attractions;
+      // Filter out Food & Drink attractions
+      return attractionsData.attractions.filter(attraction => 
+        attraction.category !== 'Food & Drink'
+      );
     } catch (error) {
       console.error('Failed to load local attractions:', error);
       return [];

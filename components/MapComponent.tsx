@@ -391,7 +391,6 @@ const MapComponent: React.FC<MapComponentProps> = ({
         .attraction-circle.entertainment { background-color: #e91e63; }
         .attraction-circle.religious { background-color: #795548; }
         .attraction-circle.shopping { background-color: #2196f3; }
-        .attraction-circle.food { background-color: #ff5722; }
         .attraction-circle.transportation { background-color: #607d8b; }
         
         /* AI processing visual feedback */
@@ -519,53 +518,37 @@ const MapComponent: React.FC<MapComponentProps> = ({
               return;
             }
             
-            // Check if this is a double tap
-            const now = Date.now();
-            const timeSinceLastTap = now - (marker.lastTapTime || 0);
+            console.log('Attraction clicked:', attraction.name);
             
-            if (timeSinceLastTap < 300) { // 300ms window for double tap
-              console.log('Double tap detected for:', attraction.name);
-              
-              // Add visual feedback for AI query
-              const markerElement = marker.getElement();
-              if (markerElement) {
-                markerElement.classList.add('ai-processing');
-                setTimeout(() => {
-                  markerElement.classList.remove('ai-processing');
-                }, 1000);
-              }
-              
-              // Send AI query
-              window.ReactNativeWebView.postMessage(JSON.stringify({
-                action: 'longPress', // Keep same action name for compatibility
-                latitude: attraction.latitude,
-                longitude: attraction.longitude,
-                attraction: attraction.name,
-                attractionData: {
-                  name: attraction.name,
-                  category: attraction.category,
-                  type: attraction.type,
-                  description: attraction.description || '',
-                  address: attraction.address || '',
-                  openingHours: attraction.openingHours || '',
-                  phone: attraction.phone || '',
-                  website: attraction.website || ''
-                }
-              }));
-              
-              // Reset tap timer
-              marker.lastTapTime = 0;
-            } else {
-              // First tap - show popup after short delay to allow for double tap
-              marker.lastTapTime = now;
+            // Show popup immediately
+            marker.openPopup();
+            
+            // Add visual feedback for AI query
+            const markerElement = marker.getElement();
+            if (markerElement) {
+              markerElement.classList.add('ai-processing');
               setTimeout(() => {
-                if (now === marker.lastTapTime) {
-                  // Single tap - show popup
-                  console.log('Single tap detected for:', attraction.name);
-                  marker.openPopup();
-                }
-              }, 300);
+                markerElement.classList.remove('ai-processing');
+              }, 1000);
             }
+            
+            // Send AI query immediately on single tap
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+              action: 'longPress', // Keep same action name for compatibility
+              latitude: attraction.latitude,
+              longitude: attraction.longitude,
+              attraction: attraction.name,
+              attractionData: {
+                name: attraction.name,
+                category: attraction.category,
+                type: attraction.type,
+                description: attraction.description || '',
+                address: attraction.address || '',
+                openingHours: attraction.openingHours || '',
+                phone: attraction.phone || '',
+                website: attraction.website || ''
+              }
+            }));
           }
           
           // Add click event listeners for both markers
@@ -586,7 +569,6 @@ const MapComponent: React.FC<MapComponentProps> = ({
             'Entertainment': '#e91e63',
             'Religious': '#795548',
             'Shopping': '#2196f3',
-            'Food & Drink': '#ff5722',
             'Transportation': '#607d8b',
             'Other': '#4285f4'
           };
@@ -603,7 +585,6 @@ const MapComponent: React.FC<MapComponentProps> = ({
             'Entertainment': 'entertainment',
             'Religious': 'religious',
             'Shopping': 'shopping',
-            'Food & Drink': 'food',
             'Transportation': 'transportation',
             'Other': 'other'
           };
@@ -620,7 +601,6 @@ const MapComponent: React.FC<MapComponentProps> = ({
             'Entertainment': '🎪',
             'Religious': '⛪',
             'Shopping': '🛍️',
-            'Food & Drink': '🍽️',
             'Transportation': '🚉',
             'Other': '📍'
           };
