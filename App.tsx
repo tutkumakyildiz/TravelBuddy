@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, View, TouchableOpacity, Alert, Text, ActivityIndicator, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AIService from './services/AIService';
-import MapComponent from './components/MapComponent';
+import MapComponent, { MapComponentRef } from './components/MapComponent';
 import LocationService, { LocationData } from './services/LocationService';
 import OfflineMapService from './services/OfflineMapService';
 
@@ -13,6 +13,10 @@ export default function App() {
   const [lastAiResponse, setLastAiResponse] = useState<string>('');
   const [isProcessingLocation, setIsProcessingLocation] = useState(false);
   const [initializationAttempted, setInitializationAttempted] = useState(false);
+  
+  // AI processing queue state
+  const [aiProcessingQueue, setAiProcessingQueue] = useState(0);
+  const [aiCurrentlyProcessing, setAiCurrentlyProcessing] = useState(false);
   
   // Map download state
   const [mapDownloaded, setMapDownloaded] = useState(false);
@@ -32,6 +36,9 @@ export default function App() {
   
   // Map view mode control
   const [forceViewMode, setForceViewMode] = useState<'current' | 'amsterdam' | null>(null);
+  
+  // Map component ref for refreshing attractions
+  const mapComponentRef = useRef<MapComponentRef>(null);
   
   const locationService = LocationService.getInstance();
   const offlineMapService = OfflineMapService.getInstance();
@@ -53,7 +60,7 @@ export default function App() {
     };
   }, []);
 
-  // Poll for download progress
+  // Poll for download progress and AI queue status
   useEffect(() => {
     const interval = setInterval(() => {
       if (mapLoading) {
@@ -70,10 +77,17 @@ export default function App() {
         }
         setAiPaused(aiService.isDownloadPaused());
       }
+      
+      // Check AI queue status if initialized
+      if (aiInitialized) {
+        const aiService = AIService.getInstance();
+        setAiProcessingQueue(aiService.getQueueLength());
+        setAiCurrentlyProcessing(aiService.isCurrentlyProcessing());
+      }
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [mapLoading, aiLoading]);
+  }, [mapLoading, aiLoading, aiInitialized]);
 
   const checkMapDownloadStatus = async () => {
     try {
@@ -330,12 +344,12 @@ export default function App() {
     }
 
     Alert.alert(
-      'Download Amsterdam Map',
-      'This will download Amsterdam map tiles and attraction points for offline use.\n\nSize: ~100MB\nTime: 5-10 minutes\n\nYou can pause/resume anytime.',
+      'Download Amsterdam Offline',
+      'This will download Amsterdam map tiles and all attractions for offline use.\n\nSize: ~100MB\nTime: 10-15 minutes\n\nYou can pause/resume anytime.',
       [
         { text: 'Cancel', style: 'cancel' },
         { 
-          text: 'Download', 
+          text: 'Start Download', 
           onPress: async () => {
             console.log('🗺️ User initiated map download...');
             setMapLoading(true);
@@ -345,9 +359,15 @@ export default function App() {
               const success = await offlineMapService.downloadCompleteOfflineData();
               if (success) {
                 setMapDownloaded(true);
+                
+                // Refresh attractions in the map component
+                if (mapComponentRef.current) {
+                  await mapComponentRef.current.refreshAttractions();
+                }
+                
                 Alert.alert(
-                  'Amsterdam Map Downloaded! 🇳🇱',
-                  'Amsterdam map and attractions are now available offline!\n\n🗺️ How to access Amsterdam:\n• Use the 🇳🇱 button (bottom-right)\n• Or tap the indicator at top-left of map\n\nYou can now explore Amsterdam offline!',
+                  'Amsterdam Downloaded! 🇳🇱',
+                  'Amsterdam map tiles and attractions are now available offline!\n\n🗺️ How to access Amsterdam:\n• Use the 🇳🇱 button (bottom-right)\n• Or tap the indicator at top-left of map\n\nYou can now explore Amsterdam without internet!',
                   [{ text: 'Switch to Amsterdam View', onPress: () => {
                     setForceViewMode('amsterdam');
                     setTimeout(() => setForceViewMode(null), 1000);
@@ -412,6 +432,25 @@ export default function App() {
     }
   };
 
+  const handleClearAIQueue = () => {
+    Alert.alert(
+      'İstekleri Temizle',
+      `Sırada ${aiProcessingQueue} AI isteği var.\n\nTüm bekleyen istekleri iptal etmek istiyor musunuz?`,
+      [
+        { text: 'Hayır', style: 'cancel' },
+        { 
+          text: 'Temizle', 
+          style: 'destructive',
+          onPress: () => {
+            const aiService = AIService.getInstance();
+            aiService.clearQueue();
+            console.log('🧹 AI request queue cleared by user');
+          }
+        }
+      ]
+    );
+  };
+
   const handleMapPress = async (clickData: { latitude: number; longitude: number; attraction?: string; attractionData?: any }) => {
     console.log('🗺️ Map pressed at coordinates:', clickData);
     
@@ -432,11 +471,13 @@ export default function App() {
 
     // If AI is still loading, return
     if (aiLoading) {
+      console.log('⚠️ AI Yükleniyor: AI model hala yükleniyor. Lütfen indirme tamamlanana kadar bekleyin.');
       return;
     }
 
     // AI must be ready to proceed
     if (!aiInitialized) {
+      console.log('⚠️ AI Hazır Değil: AI model henüz hazır değil. Lütfen önce AI modelini indirin.');
       return;
     }
 
@@ -445,6 +486,14 @@ export default function App() {
       console.log('🗺️ Processing clicked attraction query...');
       
       const aiService = AIService.getInstance();
+      
+      // Show immediate feedback for queue status
+      const queueLength = aiService.getQueueLength();
+      const isProcessing = aiService.isCurrentlyProcessing();
+      
+      if (queueLength > 0 || isProcessing) {
+        console.log(`📝 Request will be queued. Current queue: ${queueLength}, Processing: ${isProcessing}`);
+      }
       
       // Create simple query for AI based on attraction data
       let query = '';
@@ -460,17 +509,23 @@ export default function App() {
       setLastAiResponse(response.text || '');
       
       if (response.error) {
-        Alert.alert('Hata', response.error);
+        // Handle specific error types - log to console instead of showing white popups
+        if (response.error === 'Context busy') {
+          console.log('⚠️ AI Meşgul: AI model şu anda meşgul. İstek sıraya alındı, lütfen bekleyin.');
+        } else if (response.error === 'Request timeout') {
+          console.log('⚠️ Zaman Aşımı: İstek çok uzun sürdü. Lütfen tekrar deneyin.');
+        } else if (response.error === 'Request cancelled') {
+          console.log('⚠️ İptal Edildi: İstek iptal edildi.');
+        } else {
+          console.log('⚠️ Hata:', response.error);
+        }
       } else {
-        Alert.alert(
-          clickData.attraction ? `🎯 ${clickData.attraction}` : 'Mekan Bilgisi',
-          `${response.text || 'Bilgi bulunamadı'}`,
-          [{ text: 'Harika!', style: 'default' }]
-        );
+        // Response is already displayed in the dark overlay
+        console.log('✅ AI response displayed in dark overlay');
       }
     } catch (error) {
       console.error('Error processing attraction query:', error);
-      Alert.alert('Hata', 'Mekan bilgisi alınırken bir hata oluştu. Lütfen tekrar deneyin.');
+      console.log('⚠️ Hata: Mekan bilgisi alınırken bir hata oluştu. Lütfen tekrar deneyin.');
     } finally {
       setIsProcessingLocation(false);
     }
@@ -517,6 +572,7 @@ export default function App() {
       {/* Real MapLibre Map */}
       <View style={styles.mapContainer}>
         <MapComponent 
+          ref={mapComponentRef}
           style={styles.map}
           currentLocation={currentLocation}
           forceViewMode={forceViewMode}
@@ -540,8 +596,6 @@ export default function App() {
             </ScrollView>
           </View>
         )}
-
-        
 
         {/* Download Status Bar */}
         {(!mapDownloaded || !aiInitialized) && (
@@ -642,6 +696,29 @@ export default function App() {
               color={locationLoading ? "#666" : "#ffffff"} 
             />
           </TouchableOpacity>
+        )}
+
+        {/* AI Processing status overlay */}
+        {(isProcessingLocation || aiCurrentlyProcessing || aiProcessingQueue > 0) && (
+          <View style={styles.processingOverlay}>
+            <ActivityIndicator size="large" color="#ffffff" />
+            <Text style={styles.processingText}>
+              {isProcessingLocation ? 'AI Analiz Ediyor...' : 'AI İşlem Yapıyor...'}
+            </Text>
+            <Text style={styles.processingSubtext}>
+              {aiProcessingQueue > 0 
+                ? `Sırada ${aiProcessingQueue} istek var` 
+                : 'Lütfen bekleyin'}
+            </Text>
+            {aiProcessingQueue > 2 && (
+              <TouchableOpacity 
+                style={styles.clearQueueButton}
+                onPress={handleClearAIQueue}
+              >
+                <Text style={styles.clearQueueButtonText}>İstekleri Temizle</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         )}
 
       </View>
@@ -794,27 +871,7 @@ const styles = StyleSheet.create({
     color: '#666',
     fontWeight: '500',
   },
-  responseOverlay: {
-    position: 'absolute',
-    bottom: 120,
-    left: 20,
-    right: 20,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    padding: 12,
-    borderRadius: 8,
-    maxHeight: 300,
-  },
-  responseScrollView: {
-    maxHeight: 264,
-  },
-  responseText: {
-    color: '#ffffff',
-    fontSize: 12,
-    lineHeight: 16,
-  },
-  boldText: {
-    fontWeight: 'bold',
-  },
+
   controlPanel: {
     position: 'absolute',
     bottom: 50,
@@ -863,12 +920,48 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginTop: 12,
   },
-  processingSubtext: {
-    color: '#ffffff',
-    fontSize: 12,
-    marginTop: 4,
-    opacity: 0.9,
-  },
+      processingSubtext: {
+      color: '#ffffff',
+      fontSize: 12,
+      marginTop: 4,
+      opacity: 0.9,
+    },
+    clearQueueButton: {
+      marginTop: 12,
+      backgroundColor: 'rgba(255, 255, 255, 0.2)',
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: 'rgba(255, 255, 255, 0.3)',
+    },
+    clearQueueButtonText: {
+      color: '#ffffff',
+      fontSize: 12,
+      fontWeight: '500',
+      textAlign: 'center',
+    },
+    responseOverlay: {
+      position: 'absolute',
+      bottom: 120,
+      left: 20,
+      right: 20,
+      backgroundColor: 'rgba(0, 0, 0, 0.8)',
+      padding: 12,
+      borderRadius: 8,
+      maxHeight: 300,
+    },
+    responseScrollView: {
+      maxHeight: 264,
+    },
+    responseText: {
+      color: '#ffffff',
+      fontSize: 12,
+      lineHeight: 16,
+    },
+    boldText: {
+      fontWeight: 'bold',
+    },
   
   // Download Panel Styles
   downloadPanel: {

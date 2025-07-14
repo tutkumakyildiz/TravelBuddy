@@ -1,17 +1,13 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useImperativeHandle, forwardRef } from 'react';
 import { 
   View, 
   StyleSheet, 
   Alert, 
   Text, 
   TouchableOpacity, 
-  ActivityIndicator, 
-  Platform,
-  ScrollView,
-  Modal
+  ActivityIndicator
 } from 'react-native';
 import { WebView } from 'react-native-webview';
-import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import OfflineMapService, { Attraction } from '../services/OfflineMapService';
 
@@ -26,32 +22,26 @@ interface MapComponentProps {
   forceViewMode?: 'current' | 'amsterdam' | null;
 }
 
-const MapComponent: React.FC<MapComponentProps> = ({ 
+interface MapComponentRef {
+  refreshAttractions: () => Promise<void>;
+}
+
+const MapComponent = forwardRef<MapComponentRef, MapComponentProps>(({ 
   style, 
   onMapPress, 
   currentLocation,
   forceViewMode
-}) => {
+}, ref) => {
   const webViewRef = useRef<WebView>(null);
   const [userLocation, setUserLocation] = useState<Location.LocationObject | null>(null);
-  const [locationPermission, setLocationPermission] = useState<boolean>(false);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [attractions, setAttractions] = useState<Attraction[]>([]);
-  const [attractionsLoaded, setAttractionsLoaded] = useState(false);
-  const [selectedCategory, setSelectedCategory] = useState<string>('');
-  const [categories, setCategories] = useState<string[]>([]);
-  const [showAttractionsModal, setShowAttractionsModal] = useState(false);
   const [offlineDataStatus, setOfflineDataStatus] = useState({
     tilesDownloaded: false,
     attractionsDownloaded: false,
     attractionCount: 0,
-    lastUpdated: '',
     categories: []
   });
-  const [isZooming, setIsZooming] = useState(false);
-
-  
-  // NEW: View toggle state
   const [viewMode, setViewMode] = useState<'current' | 'amsterdam'>('current');
   const [isViewModeToggling, setIsViewModeToggling] = useState(false);
   
@@ -63,14 +53,14 @@ const MapComponent: React.FC<MapComponentProps> = ({
     initializeMap();
   }, []);
 
-  // NEW: Effect to handle view mode changes
+  // Effect to handle view mode changes
   useEffect(() => {
     if (mapLoaded && !isViewModeToggling) {
       updateMapCenter();
     }
   }, [viewMode, mapLoaded, currentLocation, userLocation, offlineDataStatus]);
 
-  // NEW: Effect to handle forceViewMode prop changes
+  // Effect to handle forceViewMode prop changes
   useEffect(() => {
     if (forceViewMode && forceViewMode !== viewMode) {
       setViewMode(forceViewMode);
@@ -78,14 +68,22 @@ const MapComponent: React.FC<MapComponentProps> = ({
     }
   }, [forceViewMode]);
 
-  // NEW: Create a key that changes when attractions are loaded to force WebView reload
+  // Expose refreshAttractions method through ref
+  useImperativeHandle(ref, () => ({
+    refreshAttractions: async () => {
+      console.log('🔄 Refreshing attractions after download...');
+      await loadAttractions();
+      await loadOfflineDataStatus();
+    }
+  }), []);
+
+  // Create a key that changes when attractions are loaded to force WebView reload
   const webViewKey = `map-${viewMode}-${attractions.length}`;
 
   const initializeMap = async () => {
     try {
       // Request location permissions
       const { status } = await Location.requestForegroundPermissionsAsync();
-      setLocationPermission(status === 'granted');
       
       if (status === 'granted') {
         try {
@@ -121,13 +119,7 @@ const MapComponent: React.FC<MapComponentProps> = ({
       const offlineMapService = OfflineMapService.getInstance();
       const status = await offlineMapService.getOfflineDataStatus();
       setOfflineDataStatus(status);
-      setCategories(status.categories);
       console.log('📊 Offline data status:', status);
-      
-      // NEW: Auto-switch to Amsterdam view if Amsterdam data is available and user hasn't manually changed view
-      if (status.attractionsDownloaded && status.attractionCount > 0 && viewMode === 'current') {
-        console.log('🗺️ Amsterdam data detected, suggesting Amsterdam view');
-      }
     } catch (error) {
       console.error('Failed to load offline data status:', error);
     }
@@ -138,7 +130,6 @@ const MapComponent: React.FC<MapComponentProps> = ({
       const offlineMapService = OfflineMapService.getInstance();
       const localAttractions = await offlineMapService.getLocalAttractions();
       setAttractions(localAttractions);
-      setAttractionsLoaded(true);
       console.log(`🎯 Loaded ${localAttractions.length} attractions from local storage`);
       
       if (localAttractions.length > 0) {
@@ -146,41 +137,6 @@ const MapComponent: React.FC<MapComponentProps> = ({
       }
     } catch (error) {
       console.error('Failed to load attractions:', error);
-    }
-  };
-
-  const downloadOfflineData = async () => {
-    try {
-      const offlineMapService = OfflineMapService.getInstance();
-      await offlineMapService.downloadCompleteOfflineData();
-      
-      // Reload status and attractions after download
-      setTimeout(async () => {
-        await loadOfflineDataStatus();
-        await loadAttractions();
-      }, 1000);
-    } catch (error) {
-      console.error('Failed to download offline data:', error);
-    }
-  };
-
-  const filterAttractionsByCategory = async (category: string) => {
-    try {
-      const offlineMapService = OfflineMapService.getInstance();
-      
-      if (category === '' || category === 'All') {
-        const allAttractions = await offlineMapService.getLocalAttractions();
-        setAttractions(allAttractions);
-        setSelectedCategory('');
-      } else {
-        const filteredAttractions = await offlineMapService.getAttractionsByCategory(category);
-        setAttractions(filteredAttractions);
-        setSelectedCategory(category);
-      }
-      
-      console.log(`🔍 Filtered attractions by category: ${category}`);
-    } catch (error) {
-      console.error('Failed to filter attractions:', error);
     }
   };
 
@@ -192,7 +148,7 @@ const MapComponent: React.FC<MapComponentProps> = ({
     }
   };
 
-  // NEW: Toggle between current location and Amsterdam views
+  // Toggle between current location and Amsterdam views
   const toggleViewMode = () => {
     if (isViewModeToggling) return;
     
@@ -219,7 +175,7 @@ const MapComponent: React.FC<MapComponentProps> = ({
     setTimeout(() => setIsViewModeToggling(false), 300);
   };
 
-  // NEW: Update map center based on view mode
+  // Update map center based on view mode
   const updateMapCenter = () => {
     if (webViewRef.current && mapLoaded) {
       const center = getActiveCenter();
@@ -234,7 +190,7 @@ const MapComponent: React.FC<MapComponentProps> = ({
     }
   };
 
-  // NEW: Get active center based on view mode
+  // Get active center based on view mode
   const getActiveCenter = () => {
     if (viewMode === 'amsterdam') {
       return amsterdamCenter;
@@ -247,81 +203,6 @@ const MapComponent: React.FC<MapComponentProps> = ({
     } else {
       return amsterdamCenter;
     }
-  };
-
-
-
-
-  const zoomIn = () => {
-    console.log('🔍 Zoom In button pressed');
-    
-    // Prevent rapid clicking
-    if (isZooming) {
-      console.log('⚠️ Zoom already in progress');
-      return;
-    }
-    
-    if (webViewRef.current && mapLoaded) {
-      setIsZooming(true);
-      const message = JSON.stringify({
-        action: 'zoomIn'
-      });
-      console.log('📤 Sending zoom in message:', message);
-      
-      try {
-        webViewRef.current.postMessage(message);
-      } catch (error) {
-        console.error('Error sending zoom in message:', error);
-      }
-      
-      // Reset zooming state after a short delay
-      setTimeout(() => {
-        setIsZooming(false);
-      }, 300);
-    } else {
-      console.log('⚠️ WebView ref not available or map not loaded');
-    }
-  };
-
-  const zoomOut = () => {
-    console.log('🔍 Zoom Out button pressed');
-    
-    // Prevent rapid clicking
-    if (isZooming) {
-      console.log('⚠️ Zoom already in progress');
-      return;
-    }
-    
-    if (webViewRef.current && mapLoaded) {
-      setIsZooming(true);
-      const message = JSON.stringify({
-        action: 'zoomOut'
-      });
-      console.log('📤 Sending zoom out message:', message);
-      
-      try {
-        webViewRef.current.postMessage(message);
-      } catch (error) {
-        console.error('Error sending zoom out message:', error);
-      }
-      
-      // Reset zooming state after a short delay
-      setTimeout(() => {
-        setIsZooming(false);
-      }, 300);
-    } else {
-      console.log('⚠️ WebView ref not available or map not loaded');
-    }
-  };
-
-
-
-
-
-  // Generate the initial map position
-  const getInitialCenter = () => {
-    // NEW: Use active center based on view mode
-    return getActiveCenter();
   };
 
   // Handle messages from WebView
@@ -426,7 +307,7 @@ const MapComponent: React.FC<MapComponentProps> = ({
     <body>
       <div id="map"></div>
       <script>
-        const initialCenter = ${JSON.stringify(getInitialCenter())};
+        const initialCenter = ${JSON.stringify(getActiveCenter())};
         const currentLocation = ${JSON.stringify(currentLocation)};
         const userLocation = ${JSON.stringify(userLocation ? userLocation.coords : null)};
         
@@ -447,14 +328,12 @@ const MapComponent: React.FC<MapComponentProps> = ({
         // Track zoom operations to prevent accidental clicks
         map.on('zoomstart', function() {
           isZooming = true;
-          console.log('Zoom started - disabling clicks');
         });
         
         map.on('zoomend', function() {
           // Keep zooming flag for a short time to prevent accidental clicks
           setTimeout(() => {
             isZooming = false;
-            console.log('Zoom ended - enabling clicks');
           }, 300);
         });
         
@@ -466,95 +345,93 @@ const MapComponent: React.FC<MapComponentProps> = ({
         if (attractions && attractions.length > 0) {
           console.log('🗺️ Adding', attractions.length, 'attractions to map');
           attractions.forEach(attraction => {
-          // Create circle marker instead of icon marker
-          const circleMarker = L.circleMarker([attraction.latitude, attraction.longitude], {
-            radius: 12,
-            fillColor: getCategoryColor(attraction.category),
-            color: '#ffffff',
-            weight: 3,
-            fillOpacity: 0.9,
-            className: 'attraction-circle-leaflet'
-          }).addTo(map);
-          
-          // Add category icon inside the circle
-          const categoryIcon = getCategoryIcon(attraction.category);
-          const divIcon = L.divIcon({
-            html: \`<div class="attraction-circle \${getCategoryClass(attraction.category)}" style="width: 24px; height: 24px; font-size: 12px;">\${categoryIcon}</div>\`,
-            className: 'attraction-circle-container',
-            iconSize: [24, 24],
-            iconAnchor: [12, 12],
-            popupAnchor: [0, -12]
-          });
-          
-          const iconMarker = L.marker([attraction.latitude, attraction.longitude], {
-            icon: divIcon
-          }).addTo(map);
-          
-          const popupContent = \`
-            <div class="marker-popup">
-              <h3>\${attraction.name}</h3>
-              <p><strong>Category:</strong> \${attraction.category}</p>
-              <p><strong>Type:</strong> \${attraction.type}</p>
-              \${attraction.description ? \`<p><strong>Description:</strong> \${attraction.description}</p>\` : ''}
-              \${attraction.address ? \`<p><strong>Address:</strong> \${attraction.address}</p>\` : ''}
-              \${attraction.openingHours ? \`<p><strong>Hours:</strong> \${attraction.openingHours}</p>\` : ''}
-              \${attraction.phone ? \`<p><strong>Phone:</strong> \${attraction.phone}</p>\` : ''}
-              \${attraction.website ? \`<p><strong>Website:</strong> <a href="\${attraction.website}" target="_blank">\${attraction.website}</a></p>\` : ''}
-
-            </div>
-          \`;
-          
-          // Bind popup to both markers
-          circleMarker.bindPopup(popupContent);
-          iconMarker.bindPopup(popupContent);
-          
-          // Handle attraction marker interactions
-          function handleAttractionTouch(e, marker) {
-            e.originalEvent.preventDefault();
-            e.originalEvent.stopPropagation();
+            // Create circle marker instead of icon marker
+            const circleMarker = L.circleMarker([attraction.latitude, attraction.longitude], {
+              radius: 12,
+              fillColor: getCategoryColor(attraction.category),
+              color: '#ffffff',
+              weight: 3,
+              fillOpacity: 0.9,
+              className: 'attraction-circle-leaflet'
+            }).addTo(map);
             
-            if (isZooming) {
-              console.log('Ignoring touch during zoom');
-              return;
-            }
+            // Add category icon inside the circle
+            const categoryIcon = getCategoryIcon(attraction.category);
+            const divIcon = L.divIcon({
+              html: \`<div class="attraction-circle \${getCategoryClass(attraction.category)}" style="width: 24px; height: 24px; font-size: 12px;">\${categoryIcon}</div>\`,
+              className: 'attraction-circle-container',
+              iconSize: [24, 24],
+              iconAnchor: [12, 12],
+              popupAnchor: [0, -12]
+            });
             
-            console.log('Attraction clicked:', attraction.name);
+            const iconMarker = L.marker([attraction.latitude, attraction.longitude], {
+              icon: divIcon
+            }).addTo(map);
             
-            // Show popup immediately
-            marker.openPopup();
+            const popupContent = \`
+              <div class="marker-popup">
+                <h3>\${attraction.name}</h3>
+                <p><strong>Category:</strong> \${attraction.category}</p>
+                <p><strong>Type:</strong> \${attraction.type}</p>
+                \${attraction.description ? \`<p><strong>Description:</strong> \${attraction.description}</p>\` : ''}
+                \${attraction.address ? \`<p><strong>Address:</strong> \${attraction.address}</p>\` : ''}
+                \${attraction.openingHours ? \`<p><strong>Hours:</strong> \${attraction.openingHours}</p>\` : ''}
+                \${attraction.phone ? \`<p><strong>Phone:</strong> \${attraction.phone}</p>\` : ''}
+                \${attraction.website ? \`<p><strong>Website:</strong> <a href="\${attraction.website}" target="_blank">\${attraction.website}</a></p>\` : ''}
+              </div>
+            \`;
             
-            // Add visual feedback for AI query
-            const markerElement = marker.getElement();
-            if (markerElement) {
-              markerElement.classList.add('ai-processing');
-              setTimeout(() => {
-                markerElement.classList.remove('ai-processing');
-              }, 1000);
-            }
+            // Bind popup to both markers
+            circleMarker.bindPopup(popupContent);
+            iconMarker.bindPopup(popupContent);
             
-            // Send AI query immediately on single tap
-            window.ReactNativeWebView.postMessage(JSON.stringify({
-              action: 'longPress', // Keep same action name for compatibility
-              latitude: attraction.latitude,
-              longitude: attraction.longitude,
-              attraction: attraction.name,
-              attractionData: {
-                name: attraction.name,
-                category: attraction.category,
-                type: attraction.type,
-                description: attraction.description || '',
-                address: attraction.address || '',
-                openingHours: attraction.openingHours || '',
-                phone: attraction.phone || '',
-                website: attraction.website || ''
+            // Handle attraction marker interactions
+            function handleAttractionTouch(e, marker) {
+              e.originalEvent.preventDefault();
+              e.originalEvent.stopPropagation();
+              
+              if (isZooming) {
+                return;
               }
-            }));
-          }
-          
-          // Add click event listeners for both markers
-          iconMarker.on('click', (e) => handleAttractionTouch(e, iconMarker));
-          circleMarker.on('click', (e) => handleAttractionTouch(e, circleMarker));
-        });
+              
+              console.log('Attraction clicked:', attraction.name);
+              
+              // Show popup immediately
+              marker.openPopup();
+              
+              // Add visual feedback for AI query
+              const markerElement = marker.getElement();
+              if (markerElement) {
+                markerElement.classList.add('ai-processing');
+                setTimeout(() => {
+                  markerElement.classList.remove('ai-processing');
+                }, 1000);
+              }
+              
+              // Send AI query immediately on single tap
+              window.ReactNativeWebView.postMessage(JSON.stringify({
+                action: 'longPress',
+                latitude: attraction.latitude,
+                longitude: attraction.longitude,
+                attraction: attraction.name,
+                attractionData: {
+                  name: attraction.name,
+                  category: attraction.category,
+                  type: attraction.type,
+                  description: attraction.description || '',
+                  address: attraction.address || '',
+                  openingHours: attraction.openingHours || '',
+                  phone: attraction.phone || '',
+                  website: attraction.website || ''
+                }
+              }));
+            }
+            
+            // Add click event listeners for both markers
+            iconMarker.on('click', (e) => handleAttractionTouch(e, iconMarker));
+            circleMarker.on('click', (e) => handleAttractionTouch(e, circleMarker));
+          });
         } else {
           console.log('🎯 No attractions to display on map');
         }
@@ -608,17 +485,14 @@ const MapComponent: React.FC<MapComponentProps> = ({
         }
         
         // Add location markers
-        let currentLocationMarker = null;
-        let userLocationMarker = null;
-        
         if (currentLocation) {
-          currentLocationMarker = L.marker([currentLocation.latitude, currentLocation.longitude])
+          L.marker([currentLocation.latitude, currentLocation.longitude])
             .addTo(map)
             .bindPopup('<div class="marker-popup"><b>Current Location</b><br/>' + (currentLocation.placeName || 'You are here') + '</div>');
         }
         
         if (userLocation && !currentLocation) {
-          userLocationMarker = L.marker([userLocation.latitude, userLocation.longitude])
+          L.marker([userLocation.latitude, userLocation.longitude])
             .addTo(map)
             .bindPopup('<div class="marker-popup"><b>Your Location</b><br/>GPS Location</div>');
         }
@@ -648,7 +522,7 @@ const MapComponent: React.FC<MapComponentProps> = ({
             
             // Send AI query for general location
             window.ReactNativeWebView.postMessage(JSON.stringify({
-              action: 'longPress', // Keep same action name for compatibility
+              action: 'longPress',
               latitude: e.latlng.lat,
               longitude: e.latlng.lng
             }));
@@ -671,42 +545,13 @@ const MapComponent: React.FC<MapComponentProps> = ({
         function handleMessage(messageData) {
           try {
             const data = JSON.parse(messageData);
-            console.log('WebView received message:', data);
             
-            // Check if map is initialized
             if (!map) {
               console.error('Map not initialized yet');
               return;
             }
             
-            if (data.action === 'centerMap') {
-              console.log('Centering map at:', data.latitude, data.longitude);
-              map.setView([data.latitude, data.longitude], 15);
-            } else if (data.action === 'zoomIn') {
-              console.log('Zooming in...');
-              const currentZoom = map.getZoom();
-              console.log('Current zoom level:', currentZoom);
-              
-              // Check if we can zoom in further
-              if (currentZoom < map.getMaxZoom()) {
-                map.zoomIn();
-                console.log('New zoom level:', map.getZoom());
-              } else {
-                console.log('Already at maximum zoom level');
-              }
-            } else if (data.action === 'zoomOut') {
-              console.log('Zooming out...');
-              const currentZoom = map.getZoom();
-              console.log('Current zoom level:', currentZoom);
-              
-              // Check if we can zoom out further
-              if (currentZoom > map.getMinZoom()) {
-                map.zoomOut();
-                console.log('New zoom level:', map.getZoom());
-              } else {
-                console.log('Already at minimum zoom level');
-              }
-            } else if (data.action === 'updateCenter') {
+            if (data.action === 'updateCenter') {
               console.log('Updating map center to:', data.latitude, data.longitude, 'with zoom:', data.zoom);
               map.setView([data.latitude, data.longitude], data.zoom);
             }
@@ -737,11 +582,6 @@ const MapComponent: React.FC<MapComponentProps> = ({
           window.ReactNativeWebView.postMessage(JSON.stringify({
             action: 'mapLoaded'
           }));
-          
-          // Add a small delay to ensure everything is fully loaded
-          setTimeout(function() {
-            console.log('Map fully initialized and ready for interactions');
-          }, 500);
         });
       </script>
     </body>
@@ -769,9 +609,7 @@ const MapComponent: React.FC<MapComponentProps> = ({
         )}
       />
 
-
-
-      {/* View Mode Toggle (Clickable) */}
+      {/* View Mode Toggle */}
       <TouchableOpacity
         style={[
           styles.viewModeIndicator,
@@ -792,139 +630,9 @@ const MapComponent: React.FC<MapComponentProps> = ({
           </Text>
         )}
       </TouchableOpacity>
-
-      
-
-      {/* Attractions Modal */}
-      <Modal
-        visible={showAttractionsModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setShowAttractionsModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Attractions</Text>
-              <TouchableOpacity
-                style={styles.closeButton}
-                onPress={() => setShowAttractionsModal(false)}
-              >
-                <Ionicons name="close" size={24} color="#333" />
-              </TouchableOpacity>
-            </View>
-            
-            {/* Offline Status */}
-            <View style={styles.statusContainer}>
-              <Text style={styles.statusText}>
-                {offlineDataStatus.attractionsDownloaded
-                  ? `✅ ${offlineDataStatus.attractionCount} attractions available offline`
-                  : '❌ No offline attractions available'}
-              </Text>
-              {offlineDataStatus.lastUpdated && (
-                <Text style={styles.statusSubText}>
-                  Last updated: {new Date(offlineDataStatus.lastUpdated).toLocaleDateString()}
-                </Text>
-              )}
-            </View>
-            
-            {/* Download button */}
-            {!offlineDataStatus.attractionsDownloaded && (
-              <TouchableOpacity
-                style={styles.downloadButton}
-                onPress={downloadOfflineData}
-              >
-                <Ionicons name="download" size={20} color="#fff" />
-                <Text style={styles.downloadButtonText}>Download Amsterdam Attractions</Text>
-              </TouchableOpacity>
-            )}
-            
-            {/* Category Filter */}
-            {categories.length > 0 && (
-              <View style={styles.categoryContainer}>
-                <Text style={styles.categoryTitle}>Filter by Category:</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                  <TouchableOpacity
-                    style={[
-                      styles.categoryButton,
-                      selectedCategory === '' && styles.categoryButtonActive
-                    ]}
-                    onPress={() => filterAttractionsByCategory('All')}
-                  >
-                    <Text style={[
-                      styles.categoryButtonText,
-                      selectedCategory === '' && styles.categoryButtonTextActive
-                    ]}>All</Text>
-                  </TouchableOpacity>
-                  {categories.map((category) => (
-                    <TouchableOpacity
-                      key={category}
-                      style={[
-                        styles.categoryButton,
-                        selectedCategory === category && styles.categoryButtonActive
-                      ]}
-                      onPress={() => filterAttractionsByCategory(category)}
-                    >
-                      <Text style={[
-                        styles.categoryButtonText,
-                        selectedCategory === category && styles.categoryButtonTextActive
-                      ]}>{category}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </View>
-            )}
-            
-            {/* Attractions List */}
-            <ScrollView style={styles.attractionsList}>
-              {attractions.map((attraction) => (
-                <TouchableOpacity
-                  key={attraction.id}
-                  style={styles.attractionItem}
-                  onPress={() => {
-                    // Center map on attraction
-                    if (webViewRef.current) {
-                      webViewRef.current.postMessage(JSON.stringify({
-                        action: 'centerMap',
-                        latitude: attraction.latitude,
-                        longitude: attraction.longitude
-                      }));
-                    }
-                    setShowAttractionsModal(false);
-                  }}
-                >
-                  <View style={styles.attractionHeader}>
-                    <Text style={styles.attractionName}>{attraction.name}</Text>
-                    <Text style={styles.attractionCategory}>{attraction.category}</Text>
-                  </View>
-                  {attraction.description && (
-                    <Text style={styles.attractionDescription}>
-                      {attraction.description.substring(0, 100)}
-                      {attraction.description.length > 100 ? '...' : ''}
-                    </Text>
-                  )}
-                  {attraction.address && (
-                    <Text style={styles.attractionAddress}>📍 {attraction.address}</Text>
-                  )}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
-      
-      {/* Debug info */}
-      <View style={styles.debugInfo}>
-        <Text style={styles.debugText}>Map Loaded: {mapLoaded ? 'Yes' : 'No'}</Text>
-        <Text style={styles.debugText}>Zooming: {isZooming ? 'Yes' : 'No'}</Text>
-      </View>
-
-
-
-
     </View>
   );
-};
+});
 
 const styles = StyleSheet.create({
   container: {
@@ -945,7 +653,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#666',
   },
-
   viewModeIndicator: {
     position: 'absolute',
     top: 60,
@@ -974,152 +681,7 @@ const styles = StyleSheet.create({
   viewModeDisabled: {
     opacity: 0.6,
   },
-  debugInfo: {
-    position: 'absolute',
-    top: 140,
-    right: 20,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    padding: 8,
-    borderRadius: 4,
-  },
-  debugText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    maxHeight: '80%',
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 40,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  modalTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  closeButton: {
-    padding: 5,
-  },
-  statusContainer: {
-    backgroundColor: '#f8f9fa',
-    padding: 15,
-    borderRadius: 10,
-    marginBottom: 20,
-  },
-  statusText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-  },
-  statusSubText: {
-    fontSize: 14,
-    color: '#666',
-    marginTop: 5,
-  },
-  downloadButton: {
-    backgroundColor: '#28a745',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 15,
-    borderRadius: 10,
-    marginBottom: 20,
-  },
-  downloadButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-    marginLeft: 10,
-  },
-  categoryContainer: {
-    marginBottom: 20,
-  },
-  categoryTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
-    marginBottom: 10,
-  },
-  categoryButton: {
-    backgroundColor: '#f8f9fa',
-    paddingHorizontal: 15,
-    paddingVertical: 8,
-    borderRadius: 20,
-    marginRight: 10,
-    borderWidth: 1,
-    borderColor: '#e9ecef',
-  },
-  categoryButtonActive: {
-    backgroundColor: '#007bff',
-    borderColor: '#007bff',
-  },
-  categoryButtonText: {
-    color: '#333',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  categoryButtonTextActive: {
-    color: '#fff',
-  },
-  attractionsList: {
-    flex: 1,
-  },
-  attractionItem: {
-    backgroundColor: '#f8f9fa',
-    padding: 15,
-    borderRadius: 10,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: '#e9ecef',
-  },
-  attractionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  attractionName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-    flex: 1,
-  },
-  attractionCategory: {
-    fontSize: 12,
-    color: '#007bff',
-    backgroundColor: '#e7f3ff',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    fontWeight: '500',
-  },
-  attractionDescription: {
-    fontSize: 14,
-    color: '#666',
-    lineHeight: 20,
-    marginBottom: 5,
-  },
-  attractionAddress: {
-    fontSize: 12,
-    color: '#888',
-    fontStyle: 'italic',
-  },
-
 });
 
-export default MapComponent; 
+export default MapComponent;
+export type { MapComponentRef }; 

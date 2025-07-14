@@ -8,13 +8,6 @@ interface TileDownloadProgress {
   isDownloading: boolean;
 }
 
-interface AttractionDownloadProgress {
-  totalAttractions: number;
-  downloadedAttractions: number;
-  progress: number;
-  isDownloading: boolean;
-}
-
 interface BoundingBox {
   north: number;
   south: number;
@@ -49,17 +42,10 @@ interface AttractionsData {
 class OfflineMapService {
   private static instance: OfflineMapService;
   private isDownloading: boolean = false;
-  private isDownloadingAttractions: boolean = false;
   private isPaused: boolean = false;
   private downloadProgress: TileDownloadProgress = {
     totalTiles: 0,
     downloadedTiles: 0,
-    progress: 0,
-    isDownloading: false
-  };
-  private attractionDownloadProgress: AttractionDownloadProgress = {
-    totalAttractions: 0,
-    downloadedAttractions: 0,
     progress: 0,
     isDownloading: false
   };
@@ -126,12 +112,15 @@ class OfflineMapService {
     try {
       console.log('📥 Starting complete offline data download...');
       
+      // Calculate total tiles for better estimation
+      const totalTiles = this.calculateTotalTiles();
+      
       Alert.alert(
-        'Complete Offline Download',
-        'This will download map tiles and attractions for Amsterdam.\n\nThis may take 10-15 minutes and requires ~100MB storage.\n\nYou can use your phone while this downloads in the background.',
+        'Download Amsterdam Offline',
+        `This will download:\n• ${totalTiles} map tiles for offline navigation\n• Attractions, museums, parks & points of interest\n\nEstimated time: 10-15 minutes\nStorage required: ~100MB\n\nYou can use your phone while downloading in the background.`,
         [
           { text: 'Cancel', style: 'cancel' },
-          { text: 'Download', onPress: this.performCompleteDownload.bind(this) }
+          { text: 'Start Download', onPress: this.performCompleteDownload.bind(this) }
         ]
       );
       
@@ -144,25 +133,38 @@ class OfflineMapService {
 
   private async performCompleteDownload(): Promise<void> {
     try {
+      console.log('🚀 Starting combined download process...');
+      
       // Step 1: Download map tiles
       console.log('🗺️ Step 1: Downloading map tiles...');
-      await this.downloadAmsterdamTiles();
+      const tilesSuccess = await this.downloadAmsterdamTiles();
+      
+      if (!tilesSuccess) {
+        throw new Error('Failed to download map tiles');
+      }
       
       // Step 2: Download attractions
       console.log('🎯 Step 2: Downloading attractions...');
-      await this.downloadAmsterdamAttractions();
+      const attractionsSuccess = await this.downloadAmsterdamAttractions();
+      
+      if (!attractionsSuccess) {
+        throw new Error('Failed to download attractions');
+      }
+      
+      // Get final status for completion message
+      const status = await this.getOfflineDataStatus();
       
       Alert.alert(
-        'Download Complete!',
-        'Amsterdam maps and attractions are now available offline!\n\nYou can explore the city without internet connection.',
-        [{ text: 'Awesome!' }]
+        'Amsterdam Download Complete! 🇳🇱',
+        `Successfully downloaded:\n• ${status.tilesDownloaded ? 'Map tiles' : 'Map tiles (failed)'}\n• ${status.attractionCount} attractions and points of interest\n\nAmsterdam is now fully available offline!\n\nYou can explore the city without internet connection.`,
+        [{ text: 'Explore Amsterdam!' }]
       );
       
     } catch (error) {
       console.error('❌ Complete download failed:', error);
       Alert.alert(
         'Download Failed',
-        `Failed to download offline data: ${error.message}`,
+        `Failed to download offline data: ${error.message}\n\nPlease try again when you have a stable internet connection.`,
         [{ text: 'OK' }]
       );
     }
@@ -171,7 +173,7 @@ class OfflineMapService {
   /**
    * Download Amsterdam map tiles for offline use
    */
-  async downloadAmsterdamTiles(): Promise<boolean> {
+  private async downloadAmsterdamTiles(): Promise<boolean> {
     if (this.isDownloading) {
       console.log('Download already in progress');
       return false;
@@ -183,7 +185,7 @@ class OfflineMapService {
       
       console.log('📥 Starting Amsterdam map tiles download...');
       console.log('📍 Area: Amsterdam city center and surroundings');
-      console.log('🔍 Zoom levels: 10-16');
+      console.log('🔍 Zoom levels: 12-14');
       
       // Calculate total tiles needed
       const totalTiles = this.calculateTotalTiles();
@@ -192,13 +194,6 @@ class OfflineMapService {
       
       console.log(`📊 Total tiles to download: ${totalTiles}`);
       
-      // Show user what we're doing
-      Alert.alert(
-        'Downloading Amsterdam Maps',
-        `Downloading ${totalTiles} tiles for offline use.\n\nThis will take 5-10 minutes and requires ~50MB storage.\n\nThe app will notify you when complete.`,
-        [{ text: 'OK' }]
-      );
-
       let downloadedCount = 0;
       
       // Download tiles for each zoom level
@@ -207,34 +202,34 @@ class OfflineMapService {
         
         console.log(`📥 Downloading zoom level ${zoom} (${tiles.length} tiles)`);
         
-                  // Download tiles sequentially to be respectful to OSM servers
-          for (const tile of tiles) {
-            // Check if download is paused
-            while (this.isPaused && this.isDownloading) {
-              console.log('⏸️ Download paused, waiting...');
-              await new Promise(resolve => setTimeout(resolve, 1000));
-            }
-            
-            // Check if download was cancelled
-            if (!this.isDownloading) {
-              console.log('❌ Download cancelled');
-              return false;
-            }
-            
-            try {
-              const success = await this.downloadTile(tile.x, tile.y, zoom);
-              if (success) {
-                downloadedCount++;
-                this.downloadProgress.downloadedTiles = downloadedCount;
-                this.downloadProgress.progress = downloadedCount / totalTiles;
-              }
-            } catch (error) {
-              console.error(`Failed to download tile ${tile.x}/${tile.y}/${zoom}:`, error);
-            }
-            
-            // Respectful delay between each tile download (1 second)
+        // Download tiles sequentially to be respectful to OSM servers
+        for (const tile of tiles) {
+          // Check if download is paused
+          while (this.isPaused && this.isDownloading) {
+            console.log('⏸️ Download paused, waiting...');
             await new Promise(resolve => setTimeout(resolve, 1000));
+          }
           
+          // Check if download was cancelled
+          if (!this.isDownloading) {
+            console.log('❌ Download cancelled');
+            return false;
+          }
+          
+          try {
+            const success = await this.downloadTile(tile.x, tile.y, zoom);
+            if (success) {
+              downloadedCount++;
+              this.downloadProgress.downloadedTiles = downloadedCount;
+              this.downloadProgress.progress = downloadedCount / totalTiles;
+            }
+          } catch (error) {
+            console.error(`Failed to download tile ${tile.x}/${tile.y}/${zoom}:`, error);
+          }
+          
+          // Respectful delay between each tile download (1 second)
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        
           // Log progress
           if (downloadedCount % 50 === 0) {
             console.log(`📊 Progress: ${downloadedCount}/${totalTiles} tiles (${(this.downloadProgress.progress * 100).toFixed(1)}%)`);
@@ -243,12 +238,7 @@ class OfflineMapService {
       }
       
       console.log('✅ Amsterdam tiles download completed!');
-      
-      Alert.alert(
-        'Maps Downloaded!',
-        `Successfully downloaded ${downloadedCount} tiles for Amsterdam.\n\nOffline maps are now available!`,
-        [{ text: 'Great!' }]
-      );
+      console.log(`📊 Final tiles downloaded: ${downloadedCount}/${totalTiles}`);
       
       return true;
       
@@ -269,16 +259,8 @@ class OfflineMapService {
   /**
    * Download Amsterdam attractions using Overpass API
    */
-  async downloadAmsterdamAttractions(): Promise<boolean> {
-    if (this.isDownloadingAttractions) {
-      console.log('Attractions download already in progress');
-      return false;
-    }
-
+  private async downloadAmsterdamAttractions(): Promise<boolean> {
     try {
-      this.isDownloadingAttractions = true;
-      this.attractionDownloadProgress.isDownloading = true;
-      
       console.log('🎯 Starting Amsterdam attractions download...');
       
       // Overpass API query for Amsterdam attractions
@@ -311,10 +293,6 @@ class OfflineMapService {
           nwr["amenity"="marketplace"](${this.AMSTERDAM_BBOX.south},${this.AMSTERDAM_BBOX.west},${this.AMSTERDAM_BBOX.north},${this.AMSTERDAM_BBOX.east});
           nwr["shop"="mall"](${this.AMSTERDAM_BBOX.south},${this.AMSTERDAM_BBOX.west},${this.AMSTERDAM_BBOX.north},${this.AMSTERDAM_BBOX.east});
           
-          // Popular restaurants & cafes
-          nwr["amenity"="restaurant"]["name"](${this.AMSTERDAM_BBOX.south},${this.AMSTERDAM_BBOX.west},${this.AMSTERDAM_BBOX.north},${this.AMSTERDAM_BBOX.east});
-          nwr["amenity"="cafe"]["name"](${this.AMSTERDAM_BBOX.south},${this.AMSTERDAM_BBOX.west},${this.AMSTERDAM_BBOX.north},${this.AMSTERDAM_BBOX.east});
-          
           // Transportation hubs
           nwr["railway"="station"](${this.AMSTERDAM_BBOX.south},${this.AMSTERDAM_BBOX.west},${this.AMSTERDAM_BBOX.north},${this.AMSTERDAM_BBOX.east});
           nwr["amenity"="ferry_terminal"](${this.AMSTERDAM_BBOX.south},${this.AMSTERDAM_BBOX.west},${this.AMSTERDAM_BBOX.north},${this.AMSTERDAM_BBOX.east});
@@ -342,7 +320,6 @@ class OfflineMapService {
       
       // Process the data
       const attractions = this.processOverpassData(data);
-      this.attractionDownloadProgress.totalAttractions = attractions.length;
       
       // Save to local storage
       await this.saveAttractionsToLocal(attractions);
@@ -353,9 +330,6 @@ class OfflineMapService {
     } catch (error) {
       console.error('❌ Failed to download attractions:', error);
       return false;
-    } finally {
-      this.isDownloadingAttractions = false;
-      this.attractionDownloadProgress.isDownloading = false;
     }
   }
 
@@ -473,15 +447,6 @@ class OfflineMapService {
     
     if (tags.shop === 'mall') {
       return { type: 'mall', category: 'Shopping' };
-    }
-    
-    // Food & drink
-    if (tags.amenity === 'restaurant') {
-      return { type: 'restaurant', category: 'Food & Drink' };
-    }
-    
-    if (tags.amenity === 'cafe') {
-      return { type: 'cafe', category: 'Food & Drink' };
     }
     
     // Transportation
@@ -652,53 +617,10 @@ class OfflineMapService {
   }
 
   /**
-   * Check if Amsterdam tiles are downloaded
-   */
-  async areAmsterdamTilesDownloaded(): Promise<boolean> {
-    try {
-      const tilesDir = `${FileSystem.documentDirectory}tiles/`;
-      const dirInfo = await FileSystem.getInfoAsync(tilesDir);
-      
-      if (!dirInfo.exists) {
-        return false;
-      }
-      
-      // Check if we have tiles for the main zoom level (14)
-      const zoom14Dir = `${tilesDir}14/`;
-      const zoom14Info = await FileSystem.getInfoAsync(zoom14Dir);
-      
-      return zoom14Info.exists;
-    } catch (error) {
-      console.error('Error checking tile existence:', error);
-      return false;
-    }
-  }
-
-  /**
    * Get download progress
    */
   getDownloadProgress(): TileDownloadProgress {
     return { ...this.downloadProgress };
-  }
-
-  /**
-   * Get offline tile URL template for react-native-maps
-   */
-  getOfflineTileUrlTemplate(): string {
-    return `file://${FileSystem.documentDirectory}tiles/{z}/{x}/{y}.png`;
-  }
-
-  /**
-   * Check if a specific tile exists locally
-   */
-  async isTileAvailable(x: number, y: number, z: number): Promise<boolean> {
-    try {
-      const tilePath = `${FileSystem.documentDirectory}tiles/${z}/${x}/${y}.png`;
-      const tileInfo = await FileSystem.getInfoAsync(tilePath);
-      return tileInfo.exists;
-    } catch (error) {
-      return false;
-    }
   }
 
   /**
@@ -747,89 +669,6 @@ class OfflineMapService {
   }
 
   /**
-   * Search attractions by name or type
-   */
-  async searchLocalAttractions(query: string): Promise<Attraction[]> {
-    const attractions = await this.getLocalAttractions();
-    const lowercaseQuery = query.toLowerCase();
-    
-    return attractions.filter(attraction =>
-      attraction.name.toLowerCase().includes(lowercaseQuery) ||
-      attraction.type.toLowerCase().includes(lowercaseQuery) ||
-      attraction.category.toLowerCase().includes(lowercaseQuery) ||
-      (attraction.description && attraction.description.toLowerCase().includes(lowercaseQuery))
-    );
-  }
-
-  /**
-   * Get available categories
-   */
-  async getAvailableCategories(): Promise<string[]> {
-    try {
-      const attractionsPath = `${FileSystem.documentDirectory}attractions/attractions.json`;
-      const fileInfo = await FileSystem.getInfoAsync(attractionsPath);
-      
-      if (!fileInfo.exists) {
-        return [];
-      }
-      
-      const data = await FileSystem.readAsStringAsync(attractionsPath);
-      const attractionsData: AttractionsData = JSON.parse(data);
-      
-      return attractionsData.categories;
-    } catch (error) {
-      console.error('Failed to load categories:', error);
-      return [];
-    }
-  }
-
-  /**
-   * Check if attractions are downloaded
-   */
-  async areAttractionsDownloaded(): Promise<boolean> {
-    try {
-      const attractionsPath = `${FileSystem.documentDirectory}attractions/attractions.json`;
-      const fileInfo = await FileSystem.getInfoAsync(attractionsPath);
-      return fileInfo.exists;
-    } catch (error) {
-      return false;
-    }
-  }
-
-  /**
-   * Get attractions info
-   */
-  async getAttractionsInfo(): Promise<{ count: number; lastUpdated: string; categories: string[] }> {
-    try {
-      const attractionsPath = `${FileSystem.documentDirectory}attractions/attractions.json`;
-      const fileInfo = await FileSystem.getInfoAsync(attractionsPath);
-      
-      if (!fileInfo.exists) {
-        return { count: 0, lastUpdated: '', categories: [] };
-      }
-      
-      const data = await FileSystem.readAsStringAsync(attractionsPath);
-      const attractionsData: AttractionsData = JSON.parse(data);
-      
-      return {
-        count: attractionsData.totalCount,
-        lastUpdated: attractionsData.lastUpdated,
-        categories: attractionsData.categories
-      };
-    } catch (error) {
-      console.error('Failed to get attractions info:', error);
-      return { count: 0, lastUpdated: '', categories: [] };
-    }
-  }
-
-  /**
-   * Get attractions download progress
-   */
-  getAttractionsDownloadProgress(): AttractionDownloadProgress {
-    return { ...this.attractionDownloadProgress };
-  }
-
-  /**
    * Get offline data status
    */
   async getOfflineDataStatus(): Promise<{
@@ -864,49 +703,64 @@ class OfflineMapService {
   }
 
   /**
-   * Get the tiles directory path
+   * Check if Amsterdam tiles are downloaded
    */
-  getTilesDirectory(): string {
-    return `${FileSystem.documentDirectory}tiles/`;
-  }
-
-  /**
-   * Clear all downloaded attractions
-   */
-  async clearAllAttractions(): Promise<boolean> {
+  private async areAmsterdamTilesDownloaded(): Promise<boolean> {
     try {
-      const attractionsDir = `${FileSystem.documentDirectory}attractions/`;
-      const dirInfo = await FileSystem.getInfoAsync(attractionsDir);
+      const tilesDir = `${FileSystem.documentDirectory}tiles/`;
+      const dirInfo = await FileSystem.getInfoAsync(tilesDir);
       
-      if (dirInfo.exists) {
-        await FileSystem.deleteAsync(attractionsDir);
-        console.log('🗑️ Cleared all offline attractions');
+      if (!dirInfo.exists) {
+        return false;
       }
       
-      return true;
+      // Check if we have tiles for the main zoom level (14)
+      const zoom14Dir = `${tilesDir}14/`;
+      const zoom14Info = await FileSystem.getInfoAsync(zoom14Dir);
+      
+      return zoom14Info.exists;
     } catch (error) {
-      console.error('Error clearing attractions:', error);
+      console.error('Error checking tile existence:', error);
       return false;
     }
   }
 
   /**
-   * Clear all downloaded tiles
+   * Check if attractions are downloaded
    */
-  async clearAllTiles(): Promise<boolean> {
+  private async areAttractionsDownloaded(): Promise<boolean> {
     try {
-      const tilesDir = `${FileSystem.documentDirectory}tiles/`;
-      const dirInfo = await FileSystem.getInfoAsync(tilesDir);
+      const attractionsPath = `${FileSystem.documentDirectory}attractions/attractions.json`;
+      const fileInfo = await FileSystem.getInfoAsync(attractionsPath);
+      return fileInfo.exists;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  /**
+   * Get attractions info
+   */
+  private async getAttractionsInfo(): Promise<{ count: number; lastUpdated: string; categories: string[] }> {
+    try {
+      const attractionsPath = `${FileSystem.documentDirectory}attractions/attractions.json`;
+      const fileInfo = await FileSystem.getInfoAsync(attractionsPath);
       
-      if (dirInfo.exists) {
-        await FileSystem.deleteAsync(tilesDir);
-        console.log('🗑️ Cleared all offline tiles');
+      if (!fileInfo.exists) {
+        return { count: 0, lastUpdated: '', categories: [] };
       }
       
-      return true;
+      const data = await FileSystem.readAsStringAsync(attractionsPath);
+      const attractionsData: AttractionsData = JSON.parse(data);
+      
+      return {
+        count: attractionsData.totalCount,
+        lastUpdated: attractionsData.lastUpdated,
+        categories: attractionsData.categories
+      };
     } catch (error) {
-      console.error('Error clearing tiles:', error);
-      return false;
+      console.error('Failed to get attractions info:', error);
+      return { count: 0, lastUpdated: '', categories: [] };
     }
   }
 
@@ -935,21 +789,6 @@ class OfflineMapService {
    */
   isDownloadPaused(): boolean {
     return this.isPaused;
-  }
-
-  /**
-   * Cancel the current download
-   */
-  cancelDownload(): void {
-    this.isDownloading = false;
-    this.isPaused = false;
-    this.downloadProgress = {
-      totalTiles: 0,
-      downloadedTiles: 0,
-      progress: 0,
-      isDownloading: false
-    };
-    console.log('❌ Download cancelled');
   }
 }
 
