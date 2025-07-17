@@ -34,8 +34,7 @@ export default function App() {
   const [locationLoading, setLocationLoading] = useState(true);
   const [locationError, setLocationError] = useState<string | null>(null);
   
-  // Map view mode control
-  const [forceViewMode, setForceViewMode] = useState<'current' | 'amsterdam' | null>(null);
+
   
   // Map component ref for refreshing attractions
   const mapComponentRef = useRef<MapComponentRef>(null);
@@ -367,11 +366,8 @@ export default function App() {
                 
                 Alert.alert(
                   'Amsterdam Downloaded! 🇳🇱',
-                  'Amsterdam map tiles and attractions are now available offline!\n\n🗺️ How to access Amsterdam:\n• Use the 🇳🇱 button (bottom-right)\n• Or tap the indicator at top-left of map\n\nYou can now explore Amsterdam without internet!',
-                  [{ text: 'Switch to Amsterdam View', onPress: () => {
-                    setForceViewMode('amsterdam');
-                    setTimeout(() => setForceViewMode(null), 1000);
-                  } }, { text: 'Stay Here', style: 'cancel' }]
+                  'Amsterdam map tiles and attractions are now available offline!\n\nYou can now explore Amsterdam attractions on your map!',
+                  [{ text: 'OK' }]
                 );
               } else {
                 Alert.alert('Download Failed', 'Failed to download map data. Please try again.');
@@ -392,45 +388,7 @@ export default function App() {
 
 
 
-  const handleLocationRefresh = async () => {
-    try {
-      console.log('📍 User requested location refresh...');
-      setLocationLoading(true);
-      setLocationError(null);
-      
-      // Clear cache and get fresh location
-      await locationService.clearCache();
-      const location = await locationService.getCurrentLocation(true);
-      
-      if (location) {
-        setCurrentLocation(location);
-        console.log('📍 Location refreshed:', location.placeName);
-        console.log('📍 Coordinates:', location.latitude, location.longitude);
-        
-        // Check if this is Amsterdam (fallback) or real location
-        const isAmsterdam = Math.abs(location.latitude - 52.3676) < 0.001 && 
-                           Math.abs(location.longitude - 4.9041) < 0.001;
-        
-        if (isAmsterdam) {
-          Alert.alert(
-            'Location Info',
-            'Using Amsterdam as fallback location.\n\nThis happens when:\n• GPS is disabled\n• Using Android emulator\n• Location permissions not granted\n\nTo get your real location:\n• Enable GPS/Location Services\n• Grant location permissions\n• Use a real device with GPS',
-            [{ text: 'OK' }]
-          );
-        } else {
-          Alert.alert('Location Updated', `Found your location: ${location.placeName}`, [{ text: 'OK' }]);
-        }
-      } else {
-        setLocationError('Failed to refresh location');
-        Alert.alert('Location Error', 'Failed to get your location. Using Amsterdam as fallback.', [{ text: 'OK' }]);
-      }
-    } catch (error) {
-      console.error('❌ Location refresh error:', error);
-      setLocationError(`Location refresh error: ${error.message}`);
-    } finally {
-      setLocationLoading(false);
-    }
-  };
+
 
   const handleClearAIQueue = () => {
     Alert.alert(
@@ -575,7 +533,6 @@ export default function App() {
           ref={mapComponentRef}
           style={styles.map}
           currentLocation={currentLocation}
-          forceViewMode={forceViewMode}
           onMapPress={(clickData) => {
             console.log('🗺️ Map pressed at:', clickData);
             handleMapPress(clickData);
@@ -657,46 +614,9 @@ export default function App() {
           </View>
         )}
 
-        {/* Amsterdam View Button - Show when map is downloaded */}
-        {mapDownloaded && (
-          <TouchableOpacity 
-            style={[
-              styles.floatingButton,
-              styles.amsterdamButton,
-            ]} 
-            onPress={() => {
-              // Force the map to show Amsterdam
-              console.log('🇳🇱 Switching to Amsterdam view...');
-              setForceViewMode('amsterdam');
-              
-              // Reset after a short delay so user can toggle again
-              setTimeout(() => {
-                setForceViewMode(null);
-              }, 1000);
-            }}
-          >
-            <Text style={styles.amsterdamButtonText}>🇳🇱</Text>
-          </TouchableOpacity>
-        )}
 
-        {/* Location Refresh Button - Only show when ready */}
-        {mapDownloaded && aiInitialized && (
-          <TouchableOpacity 
-            style={[
-              styles.floatingButton,
-              styles.locationButton,
-              locationLoading && styles.disabledButton
-            ]} 
-            onPress={handleLocationRefresh}
-            disabled={locationLoading}
-          >
-            <Ionicons 
-              name="location-outline" 
-              size={24} 
-              color={locationLoading ? "#666" : "#ffffff"} 
-            />
-          </TouchableOpacity>
-        )}
+
+
 
         {/* AI Processing status overlay */}
         {(isProcessingLocation || aiCurrentlyProcessing || aiProcessingQueue > 0) && (
@@ -891,10 +811,7 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: 'rgba(255, 255, 255, 0.3)',
   },
-  locationButton: {
-    backgroundColor: 'rgba(255, 152, 0, 0.7)',
-    marginRight: 20,
-  },
+
   downloadButton: {
     backgroundColor: 'rgba(76, 175, 80, 0.7)',
     marginRight: 20,
@@ -1089,13 +1006,5 @@ const styles = StyleSheet.create({
     shadowRadius: 3.84,
     elevation: 5,
   },
-  amsterdamButton: {
-    backgroundColor: 'rgba(255, 102, 0, 0.9)',
-    bottom: 90,
-  },
-  amsterdamButtonText: {
-    fontSize: 24,
-    color: '#fff',
-    fontWeight: 'bold',
-  },
+
 });

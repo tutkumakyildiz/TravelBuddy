@@ -19,7 +19,6 @@ interface MapComponentProps {
     longitude: number;
     placeName?: string;
   };
-  forceViewMode?: 'current' | 'amsterdam' | null;
 }
 
 interface MapComponentRef {
@@ -29,8 +28,7 @@ interface MapComponentRef {
 const MapComponent = forwardRef<MapComponentRef, MapComponentProps>(({ 
   style, 
   onMapPress, 
-  currentLocation,
-  forceViewMode
+  currentLocation
 }, ref) => {
   const webViewRef = useRef<WebView>(null);
   const [userLocation, setUserLocation] = useState<Location.LocationObject | null>(null);
@@ -42,10 +40,8 @@ const MapComponent = forwardRef<MapComponentRef, MapComponentProps>(({
     attractionCount: 0,
     categories: []
   });
-  const [viewMode, setViewMode] = useState<'current' | 'amsterdam'>('current');
-  const [isViewModeToggling, setIsViewModeToggling] = useState(false);
   
-  // Amsterdam center coordinates as default
+  // Amsterdam center coordinates as default fallback
   const amsterdamCenter = { latitude: 52.3676, longitude: 4.9041 };
 
   useEffect(() => {
@@ -53,20 +49,12 @@ const MapComponent = forwardRef<MapComponentRef, MapComponentProps>(({
     initializeMap();
   }, []);
 
-  // Effect to handle view mode changes
+  // Effect to handle location changes and update map center
   useEffect(() => {
-    if (mapLoaded && !isViewModeToggling) {
+    if (mapLoaded) {
       updateMapCenter();
     }
-  }, [viewMode, mapLoaded, currentLocation, userLocation, offlineDataStatus]);
-
-  // Effect to handle forceViewMode prop changes
-  useEffect(() => {
-    if (forceViewMode && forceViewMode !== viewMode) {
-      setViewMode(forceViewMode);
-      console.log('🗺️ View mode forced to:', forceViewMode);
-    }
-  }, [forceViewMode]);
+  }, [mapLoaded, currentLocation, userLocation, offlineDataStatus]);
 
   // Expose refreshAttractions method through ref
   useImperativeHandle(ref, () => ({
@@ -78,7 +66,7 @@ const MapComponent = forwardRef<MapComponentRef, MapComponentProps>(({
   }), []);
 
   // Create a key that changes when attractions are loaded to force WebView reload
-  const webViewKey = `map-${viewMode}-${attractions.length}`;
+  const webViewKey = `map-current-${attractions.length}`;
 
   const initializeMap = async () => {
     try {
@@ -148,34 +136,7 @@ const MapComponent = forwardRef<MapComponentRef, MapComponentProps>(({
     }
   };
 
-  // Toggle between current location and Amsterdam views
-  const toggleViewMode = () => {
-    if (isViewModeToggling) return;
-    
-    setIsViewModeToggling(true);
-    
-    if (viewMode === 'current') {
-      // Switch to Amsterdam
-      if (offlineDataStatus.attractionsDownloaded) {
-        setViewMode('amsterdam');
-        console.log('🗺️ Switching to Amsterdam view');
-      } else {
-        Alert.alert(
-          'Amsterdam Data Not Available',
-          'Please download Amsterdam map data first to view Amsterdam attractions.',
-          [{ text: 'OK' }]
-        );
-      }
-    } else {
-      // Switch to current location
-      setViewMode('current');
-      console.log('🗺️ Switching to current location view');
-    }
-    
-    setTimeout(() => setIsViewModeToggling(false), 300);
-  };
-
-  // Update map center based on view mode
+  // Update map center based on current location
   const updateMapCenter = () => {
     if (webViewRef.current && mapLoaded) {
       const center = getActiveCenter();
@@ -183,19 +144,15 @@ const MapComponent = forwardRef<MapComponentRef, MapComponentProps>(({
         action: 'updateCenter',
         latitude: center.latitude,
         longitude: center.longitude,
-        zoom: viewMode === 'amsterdam' ? 13 : 14
+        zoom: 14
       });
       webViewRef.current.postMessage(message);
       console.log('📍 Updated map center to:', center);
     }
   };
 
-  // Get active center based on view mode
+  // Get active center - prioritize currentLocation, then userLocation, then Amsterdam as fallback
   const getActiveCenter = () => {
-    if (viewMode === 'amsterdam') {
-      return amsterdamCenter;
-    }
-    
     if (currentLocation) {
       return { latitude: currentLocation.latitude, longitude: currentLocation.longitude };
     } else if (userLocation) {
@@ -610,26 +567,7 @@ const MapComponent = forwardRef<MapComponentRef, MapComponentProps>(({
       />
 
       {/* View Mode Toggle */}
-      <TouchableOpacity
-        style={[
-          styles.viewModeIndicator,
-          isViewModeToggling && styles.viewModeDisabled
-        ]}
-        onPress={toggleViewMode}
-        disabled={isViewModeToggling}
-      >
-        <Text style={styles.viewModeText}>
-          {viewMode === 'amsterdam' ? '🇳🇱 Amsterdam' : '📍 My Location'}
-        </Text>
-        {offlineDataStatus.attractionsDownloaded && (
-          <Text style={styles.viewModeSubText}>
-            {viewMode === 'amsterdam' 
-              ? `${offlineDataStatus.attractionCount} attractions` 
-              : 'Tap to see Amsterdam'
-            }
-          </Text>
-        )}
-      </TouchableOpacity>
+      {/* Removed View Mode Toggle */}
     </View>
   );
 });
@@ -653,34 +591,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#666',
   },
-  viewModeIndicator: {
-    position: 'absolute',
-    top: 60,
-    left: 20,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    paddingHorizontal: 15,
-    paddingVertical: 8,
-    borderRadius: 20,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-  viewModeText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
-    textAlign: 'center',
-  },
-  viewModeSubText: {
-    color: '#ccc',
-    fontSize: 12,
-    textAlign: 'center',
-    marginTop: 2,
-  },
-  viewModeDisabled: {
-    opacity: 0.6,
-  },
+
 });
 
 export default MapComponent;
