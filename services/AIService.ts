@@ -184,7 +184,7 @@ class AIService {
       const messages: RNLlamaOAICompatibleMessage[] = [
         {
           role: 'system',
-          content: 'Sen bir uzman rehbersin. Yerler hakkında tarihi, turistik ve ilginç bilgiler verirsin. Cevaplarını ayrıntılı ama özlü bir şekilde tamamla. Cümleleri yarım bırakma.'
+          content: 'Sen bir uzman rehbersin. Yerler hakkında tarihi, turistik ve ilginç bilgiler verirsin. Arkadasca bir tonda cevap verirsin.'
         },
         {
           role: 'user',

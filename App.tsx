@@ -459,7 +459,7 @@ export default function App() {
         const attraction = clickData.attractionData;
         query = `${attraction.name} hakkında tarihi, turistik ve ilginç bilgiler ver.`;
       } else if (clickData.attraction) {
-        query = `${clickData.attraction} hakkında tarihi, turistik ve ilginç bilgiler ver.`;
+        query = `${clickData.attraction} hakkinda neler biliyorsun? Tarihi, turistik ve ilginç bilgileri duymak isterim.`;
       }
       
       const response = await aiService.processText(query);
