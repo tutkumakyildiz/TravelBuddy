@@ -184,7 +184,7 @@ class AIService {
       const messages: RNLlamaOAICompatibleMessage[] = [
         {
           role: 'system',
-          content: 'Sen bir uzman rehbersin. Yerler hakkında tarihi, turistik ve ilginç bilgiler verirsin. Arkadasca bir tonda cevap verirsin.'
+          content: 'You are an expert travel guide. You provide historical, touristic, and interesting facts about places user selected. Also, user can ask you about translations. You respond in a friendly tone.'
         },
         {
           role: 'user',
@@ -229,14 +229,14 @@ class AIService {
       if (error.message?.includes('memory') || error.message?.includes('OutOfMemory')) {
         return { 
           error: 'Memory limit exceeded',
-          text: 'Bellek sınırı aşıldı. Lütfen daha kısa bir soru deneyin veya uygulamayı yeniden başlatın.'
+          text: 'Memory limit exceeded. Please try a shorter question or restart the app.'
         };
       }
       
       if (error.message?.includes('timeout')) {
         return { 
           error: 'Processing timeout',
-          text: 'İşleme çok uzun sürdü. Lütfen daha basit bir soru deneyin.'
+          text: 'Processing took too long. Please try a simpler question.'
         };
       }
       
@@ -244,13 +244,13 @@ class AIService {
       if (error.message?.includes('Context is busy') || error.message?.includes('busy')) {
         return { 
           error: 'Context busy',
-          text: 'AI model meşgul. Lütfen bir süre bekleyin ve tekrar deneyin.'
+          text: 'AI model is busy. Please wait a moment and try again.'
         };
       }
       
       return { 
         error: `Processing failed: ${error.message}`,
-        text: 'Üzgünüm, isteğinizi işlerken bir hata oluştu. Lütfen tekrar deneyin.'
+        text: 'Sorry, an error occurred while processing your request. Please try again.'
       };
     }
   }
