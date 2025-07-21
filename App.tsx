@@ -545,7 +545,15 @@ export default function App() {
         {/* Last AI Response Display */}
         {lastAiResponse && !isProcessingLocation && (
           <View style={styles.responseOverlay}>
-            <ScrollView style={styles.responseScrollView} showsVerticalScrollIndicator={true}>
+            <TouchableOpacity
+              style={{ position: 'absolute', top: 6, right: 6, zIndex: 2, padding: 6 }}
+              onPress={() => setLastAiResponse('')}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="close" size={20} color="#fff" />
+            </TouchableOpacity>
+            <ScrollView style={[styles.responseScrollView, { paddingTop: 10 }]}
+              showsVerticalScrollIndicator={true}>
               <Text style={styles.responseText}>
                 🤖 {parseFormattedText(lastAiResponse).map((part, index) => (
                   <Text key={index} style={part.bold ? styles.boldText : null}>
