@@ -186,9 +186,9 @@ export default function App() {
               
               // Show user that we're starting the heavy download/initialization
               Alert.alert(
-                'AI Modeli Yükleniyor', 
-                'LocalTravelBuddy, Gemma 3n AI modelini yüklüyor (2.9GB).\n\nİlk kurulum 5-10 dakika sürebilir.\n\nHazır olduğunda bilgilendirileceksiniz.',
-                [{ text: 'Tamam', style: 'default' }]
+                'AI Model Loading', 
+                'LocalTravelBuddy is downloading the Gemma 3n AI model (2.9GB).\n\nInitial setup may take 5-10 minutes.\n\nYou will be notified when it\'s ready.',
+                [{ text: 'OK', style: 'default' }]
               );
               
               // Add comprehensive progress monitoring
@@ -236,9 +236,9 @@ export default function App() {
         setAiInitialized(true);
         console.log('✅ Gemma 3n AI model fully loaded and ready');
         Alert.alert(
-          'AI Hazır', 
-          'LocalTravelBuddy AI (Gemma 3n) tamamen yüklendi ve hazır!\n\nTüm konum özellikleri kullanılabilir.',
-          [{ text: 'Harika!', style: 'default' }]
+          'AI Ready', 
+          'LocalTravelBuddy AI (Gemma 3n) is fully loaded and ready!\n\nAll location features are now available.',
+          [{ text: 'Great!', style: 'default' }]
         );
         return true;
       } else {
@@ -393,12 +393,12 @@ export default function App() {
 
   const handleClearAIQueue = () => {
     Alert.alert(
-      'İstekleri Temizle',
-      `Sırada ${aiProcessingQueue} AI isteği var.\n\nTüm bekleyen istekleri iptal etmek istiyor musunuz?`,
+      'Clear Requests',
+      `There are ${aiProcessingQueue} AI requests in the queue.\n\nDo you want to cancel all pending requests?`,
       [
-        { text: 'Hayır', style: 'cancel' },
+        { text: 'No', style: 'cancel' },
         { 
-          text: 'Temizle', 
+          text: 'Clear', 
           style: 'destructive',
           onPress: () => {
             const aiService = AIService.getInstance();
@@ -430,13 +430,13 @@ export default function App() {
 
     // If AI is still loading, return
     if (aiLoading) {
-      console.log('⚠️ AI Yükleniyor: AI model hala yükleniyor. Lütfen indirme tamamlanana kadar bekleyin.');
+      console.log('⚠️ AI Loading: AI model is still loading. Please wait until the download is complete.');
       return;
     }
 
     // AI must be ready to proceed
     if (!aiInitialized) {
-      console.log('⚠️ AI Hazır Değil: AI model henüz hazır değil. Lütfen önce AI modelini indirin.');
+      console.log('⚠️ AI Not Ready: AI model is not ready yet. Please download the AI model first.');
       return;
     }
 
@@ -458,9 +458,9 @@ export default function App() {
       let query = '';
       if (clickData.attractionData) {
         const attraction = clickData.attractionData;
-        query = `${attraction.name} hakkında tarihi, turistik ve ilginç bilgiler ver.`;
+        query = `Give me historical, touristic, and interesting facts about ${attraction.name}.`;
       } else if (clickData.attraction) {
-        query = `${clickData.attraction} hakkinda neler biliyorsun? Tarihi, turistik ve ilginç bilgileri duymak isterim.`;
+        query = `What do you know about ${clickData.attraction}? I would like to hear historical, touristic, and interesting facts.`;
       }
       
       const response = await aiService.processText(query);
@@ -470,13 +470,13 @@ export default function App() {
       if (response.error) {
         // Handle specific error types - log to console instead of showing white popups
         if (response.error === 'Context busy') {
-          console.log('⚠️ AI Meşgul: AI model şu anda meşgul. İstek sıraya alındı, lütfen bekleyin.');
+          console.log('⚠️ AI Busy: The AI model is currently busy. The request has been queued, please wait.');
         } else if (response.error === 'Request timeout') {
-          console.log('⚠️ Zaman Aşımı: İstek çok uzun sürdü. Lütfen tekrar deneyin.');
+          console.log('⚠️ Timeout: The request took too long. Please try again.');
         } else if (response.error === 'Request cancelled') {
-          console.log('⚠️ İptal Edildi: İstek iptal edildi.');
+          console.log('⚠️ Cancelled: The request was cancelled.');
         } else {
-          console.log('⚠️ Hata:', response.error);
+          console.log('⚠️ Error:', response.error);
         }
       } else {
         // Response is already displayed in the dark overlay
@@ -484,7 +484,7 @@ export default function App() {
       }
     } catch (error) {
       console.error('Error processing attraction query:', error);
-      console.log('⚠️ Hata: Mekan bilgisi alınırken bir hata oluştu. Lütfen tekrar deneyin.');
+      console.log('⚠️ Error: An error occurred while retrieving place information. Please try again.');
     } finally {
       setIsProcessingLocation(false);
     }
@@ -626,19 +626,19 @@ export default function App() {
           <View style={styles.processingOverlay}>
             <ActivityIndicator size="large" color="#ffffff" />
             <Text style={styles.processingText}>
-              {isProcessingLocation ? 'AI Analiz Ediyor...' : 'AI İşlem Yapıyor...'}
+              {isProcessingLocation ? 'AI is analyzing...' : 'AI is processing...'}
             </Text>
             <Text style={styles.processingSubtext}>
               {aiProcessingQueue > 0 
-                ? `Sırada ${aiProcessingQueue} istek var` 
-                : 'Lütfen bekleyin'}
+                ? `${aiProcessingQueue} requests in queue` 
+                : 'Please wait'}
             </Text>
             {aiProcessingQueue > 2 && (
               <TouchableOpacity 
                 style={styles.clearQueueButton}
                 onPress={handleClearAIQueue}
               >
-                <Text style={styles.clearQueueButtonText}>İstekleri Temizle</Text>
+                <Text style={styles.clearQueueButtonText}>Clear Requests</Text>
               </TouchableOpacity>
             )}
           </View>

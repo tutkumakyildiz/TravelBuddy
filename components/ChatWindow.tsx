@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AIService from '../services/AIService';
@@ -19,6 +19,12 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ visible, onClose }) => {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const flatListRef = useRef<FlatList>(null);
+
+  useEffect(() => {
+    if (!visible) {
+      setMessages([]);
+    }
+  }, [visible]);
 
   if (!visible) return null;
 
@@ -41,12 +47,12 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ visible, onClose }) => {
       const response = await aiService.processText(userMessage.text);
       const aiMessage: Message = {
         id: Date.now() + '-ai',
-        text: response.text || 'Yanıt alınamadı.',
+        text: response.text || 'No response received.',
         sender: 'ai',
       };
       setMessages((prev) => [...prev, aiMessage]);
     } catch (e) {
-      setMessages((prev) => [...prev, { id: Date.now() + '-ai', text: 'AI ile iletişimde hata oluştu.', sender: 'ai' }]);
+      setMessages((prev) => [...prev, { id: Date.now() + '-ai', text: 'Error communicating with AI.', sender: 'ai' }]);
     } finally {
       setSending(false);
       setTimeout(() => {
@@ -84,7 +90,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ visible, onClose }) => {
               style={styles.input}
               value={input}
               onChangeText={setInput}
-              placeholder="Mesajınızı yazın..."
+              placeholder="Type your message..."
               placeholderTextColor="#aaa"
               editable={!sending}
               onSubmitEditing={sendMessage}
