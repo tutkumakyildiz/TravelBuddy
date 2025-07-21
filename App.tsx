@@ -6,6 +6,7 @@ import AIService from './services/AIService';
 import MapComponent, { MapComponentRef } from './components/MapComponent';
 import LocationService, { LocationData } from './services/LocationService';
 import OfflineMapService from './services/OfflineMapService';
+import ChatWindow from './components/ChatWindow';
 
 export default function App() {
   const [aiInitialized, setAiInitialized] = useState(false);
@@ -525,6 +526,8 @@ export default function App() {
     return parts;
   };
 
+  const [chatOpen, setChatOpen] = useState(false);
+
   return (
     <View style={styles.container}>
       {/* Real MapLibre Map */}
@@ -640,6 +643,15 @@ export default function App() {
             )}
           </View>
         )}
+
+        {/* Floating Chat Button */}
+        {!chatOpen && (
+          <TouchableOpacity style={styles.floatingButton} onPress={() => setChatOpen(true)}>
+            <Ionicons name="chatbubble-ellipses-outline" size={28} color="#fff" />
+          </TouchableOpacity>
+        )}
+        {/* Chat Window Overlay */}
+        <ChatWindow visible={chatOpen} onClose={() => setChatOpen(false)} />
 
       </View>
 
