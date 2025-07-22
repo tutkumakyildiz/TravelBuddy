@@ -50,6 +50,14 @@ class OfflineMapService {
     isDownloading: false
   };
 
+  // Attraction download progress state
+  private attractionDownloadProgress = {
+    total: 0,
+    downloaded: 0,
+    progress: 0,
+    isDownloading: false
+  };
+
   // Amsterdam bounding box coordinates
   private readonly AMSTERDAM_BBOX: BoundingBox = {
     north: 52.431,   // North of Amsterdam
@@ -111,19 +119,8 @@ class OfflineMapService {
   async downloadCompleteOfflineData(): Promise<boolean> {
     try {
       console.log('📥 Starting complete offline data download...');
-      
-      // Calculate total tiles for better estimation
-      const totalTiles = this.calculateTotalTiles();
-      
-      Alert.alert(
-        'Download Amsterdam Offline',
-        `This will download:\n• ${totalTiles} map tiles for offline navigation\n• Attractions, museums, parks & points of interest\n\nEstimated time: 10-15 minutes\nStorage required: ~100MB\n\nYou can use your phone while downloading in the background.`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Start Download', onPress: this.performCompleteDownload.bind(this) }
-        ]
-      );
-      
+      // Start the download immediately (no confirmation Alert)
+      await this.performCompleteDownload();
       return true;
     } catch (error) {
       console.error('❌ Failed to start complete download:', error);
@@ -262,38 +259,27 @@ class OfflineMapService {
   private async downloadAmsterdamAttractions(): Promise<boolean> {
     try {
       console.log('🎯 Starting Amsterdam attractions download...');
-      
+      this.attractionDownloadProgress.isDownloading = true;
+      this.attractionDownloadProgress.total = 0;
+      this.attractionDownloadProgress.downloaded = 0;
+      this.attractionDownloadProgress.progress = 0;
+
       // Overpass API query for Amsterdam attractions
       const overpassQuery = `
         [out:json][timeout:120];
         (
-          // Museums
           nwr["tourism"="museum"](${this.AMSTERDAM_BBOX.south},${this.AMSTERDAM_BBOX.west},${this.AMSTERDAM_BBOX.north},${this.AMSTERDAM_BBOX.east});
-          
-          // Attractions & viewpoints
           nwr["tourism"="attraction"](${this.AMSTERDAM_BBOX.south},${this.AMSTERDAM_BBOX.west},${this.AMSTERDAM_BBOX.north},${this.AMSTERDAM_BBOX.east});
           nwr["tourism"="viewpoint"](${this.AMSTERDAM_BBOX.south},${this.AMSTERDAM_BBOX.west},${this.AMSTERDAM_BBOX.north},${this.AMSTERDAM_BBOX.east});
-          
-          // Historic sites
           nwr["historic"~"^(monument|castle|palace|church|building|archaeological_site)$"](${this.AMSTERDAM_BBOX.south},${this.AMSTERDAM_BBOX.west},${this.AMSTERDAM_BBOX.north},${this.AMSTERDAM_BBOX.east});
-          
-          // Parks & gardens
           nwr["leisure"="park"](${this.AMSTERDAM_BBOX.south},${this.AMSTERDAM_BBOX.west},${this.AMSTERDAM_BBOX.north},${this.AMSTERDAM_BBOX.east});
           nwr["leisure"="garden"](${this.AMSTERDAM_BBOX.south},${this.AMSTERDAM_BBOX.west},${this.AMSTERDAM_BBOX.north},${this.AMSTERDAM_BBOX.east});
-          
-          // Theaters, cinemas & arts
           nwr["amenity"="theatre"](${this.AMSTERDAM_BBOX.south},${this.AMSTERDAM_BBOX.west},${this.AMSTERDAM_BBOX.north},${this.AMSTERDAM_BBOX.east});
           nwr["amenity"="cinema"](${this.AMSTERDAM_BBOX.south},${this.AMSTERDAM_BBOX.west},${this.AMSTERDAM_BBOX.north},${this.AMSTERDAM_BBOX.east});
           nwr["amenity"="arts_centre"](${this.AMSTERDAM_BBOX.south},${this.AMSTERDAM_BBOX.west},${this.AMSTERDAM_BBOX.north},${this.AMSTERDAM_BBOX.east});
-          
-          // Places of worship
           nwr["amenity"="place_of_worship"](${this.AMSTERDAM_BBOX.south},${this.AMSTERDAM_BBOX.west},${this.AMSTERDAM_BBOX.north},${this.AMSTERDAM_BBOX.east});
-          
-          // Markets & shopping
           nwr["amenity"="marketplace"](${this.AMSTERDAM_BBOX.south},${this.AMSTERDAM_BBOX.west},${this.AMSTERDAM_BBOX.north},${this.AMSTERDAM_BBOX.east});
           nwr["shop"="mall"](${this.AMSTERDAM_BBOX.south},${this.AMSTERDAM_BBOX.west},${this.AMSTERDAM_BBOX.north},${this.AMSTERDAM_BBOX.east});
-          
-          // Transportation hubs
           nwr["railway"="station"](${this.AMSTERDAM_BBOX.south},${this.AMSTERDAM_BBOX.west},${this.AMSTERDAM_BBOX.north},${this.AMSTERDAM_BBOX.east});
           nwr["amenity"="ferry_terminal"](${this.AMSTERDAM_BBOX.south},${this.AMSTERDAM_BBOX.west},${this.AMSTERDAM_BBOX.north},${this.AMSTERDAM_BBOX.east});
         );
@@ -304,7 +290,6 @@ class OfflineMapService {
       const overpassUrl = `https://overpass-api.de/api/interpreter?data=${encodedQuery}`;
       
       console.log('📡 Fetching attractions from Overpass API...');
-      
       const response = await fetch(overpassUrl, {
         headers: {
           'User-Agent': 'LocalTravelBuddy/1.0 (Development Build)',
@@ -317,17 +302,29 @@ class OfflineMapService {
       }
 
       const data = await response.json();
-      
-      // Process the data
       const attractions = this.processOverpassData(data);
-      
-      // Save to local storage
+      this.attractionDownloadProgress.total = attractions.length;
+      this.attractionDownloadProgress.downloaded = 0;
+      this.attractionDownloadProgress.progress = 0;
+
+      // Simulate per-attraction progress (since saving is fast, but we want UI feedback)
+      for (let i = 0; i < attractions.length; i++) {
+        // Simulate a small delay for progress feedback (remove or adjust as needed)
+        await new Promise(resolve => setTimeout(resolve, 2));
+        this.attractionDownloadProgress.downloaded = i + 1;
+        this.attractionDownloadProgress.progress = (i + 1) / attractions.length;
+      }
+
+      // Save to local storage (atomic write)
       await this.saveAttractionsToLocal(attractions);
-      
+
+      this.attractionDownloadProgress.isDownloading = false;
+      this.attractionDownloadProgress.progress = 1;
       console.log(`✅ Downloaded ${attractions.length} attractions for Amsterdam`);
       return true;
-      
     } catch (error) {
+      this.attractionDownloadProgress.isDownloading = false;
+      this.attractionDownloadProgress.progress = 0;
       console.error('❌ Failed to download attractions:', error);
       return false;
     }
@@ -500,23 +497,47 @@ class OfflineMapService {
         categories: categories
       };
       
+      // Atomic write for main attractions file
       const attractionsPath = `${FileSystem.documentDirectory}attractions/attractions.json`;
+      const tempAttractionsPath = `${FileSystem.documentDirectory}attractions/attractions.json.tmp`;
       await FileSystem.writeAsStringAsync(
-        attractionsPath, 
+        tempAttractionsPath, 
         JSON.stringify(attractionsData, null, 2)
       );
+      try {
+        await FileSystem.moveAsync({
+          from: tempAttractionsPath,
+          to: attractionsPath
+        });
+      } catch (moveError) {
+        console.error('Failed to atomically move attractions file:', moveError);
+        // Clean up temp file if move fails
+        try { await FileSystem.deleteAsync(tempAttractionsPath); } catch {}
+        throw moveError;
+      }
       
-      // Save attractions by category for faster filtering
+      // Atomic write for category files
       for (const category of categories) {
         const categoryAttractions = attractions.filter(a => a.category === category);
         const categoryPath = `${FileSystem.documentDirectory}attractions/${category.toLowerCase().replace(/\s+/g, '_')}.json`;
+        const tempCategoryPath = `${categoryPath}.tmp`;
         await FileSystem.writeAsStringAsync(
-          categoryPath,
+          tempCategoryPath,
           JSON.stringify(categoryAttractions, null, 2)
         );
+        try {
+          await FileSystem.moveAsync({
+            from: tempCategoryPath,
+            to: categoryPath
+          });
+        } catch (moveError) {
+          console.error(`Failed to atomically move category file for ${category}:`, moveError);
+          try { await FileSystem.deleteAsync(tempCategoryPath); } catch {}
+          throw moveError;
+        }
       }
       
-      console.log('💾 Saved attractions to local storage');
+      console.log('💾 Saved attractions to local storage (atomic write)');
     } catch (error) {
       console.error('Failed to save attractions:', error);
       throw error;
@@ -624,6 +645,13 @@ class OfflineMapService {
   }
 
   /**
+   * Get attraction download progress
+   */
+  getAttractionDownloadProgress() {
+    return { ...this.attractionDownloadProgress };
+  }
+
+  /**
    * Load attractions from local storage
    */
   async getLocalAttractions(): Promise<Attraction[]> {
@@ -636,8 +664,17 @@ class OfflineMapService {
       }
       
       const data = await FileSystem.readAsStringAsync(attractionsPath);
-      const attractionsData: AttractionsData = JSON.parse(data);
-      
+      if (!data || data.trim().length === 0) {
+        console.warn('Attractions file is empty. Returning empty list.');
+        return [];
+      }
+      let attractionsData: AttractionsData;
+      try {
+        attractionsData = JSON.parse(data);
+      } catch (parseError) {
+        console.warn('Attractions file is invalid JSON. Returning empty list.');
+        return [];
+      }
       // Filter out Food & Drink attractions
       return attractionsData.attractions.filter(attraction => 
         attraction.category !== 'Food & Drink'
@@ -751,8 +788,17 @@ class OfflineMapService {
       }
       
       const data = await FileSystem.readAsStringAsync(attractionsPath);
-      const attractionsData: AttractionsData = JSON.parse(data);
-      
+      if (!data || data.trim().length === 0) {
+        console.warn('Attractions file is empty. Returning empty info.');
+        return { count: 0, lastUpdated: '', categories: [] };
+      }
+      let attractionsData: AttractionsData;
+      try {
+        attractionsData = JSON.parse(data);
+      } catch (parseError) {
+        console.warn('Attractions file is invalid JSON. Returning empty info.');
+        return { count: 0, lastUpdated: '', categories: [] };
+      }
       return {
         count: attractionsData.totalCount,
         lastUpdated: attractionsData.lastUpdated,

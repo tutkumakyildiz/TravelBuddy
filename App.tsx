@@ -35,8 +35,9 @@ export default function App() {
   const [locationLoading, setLocationLoading] = useState(true);
   const [locationError, setLocationError] = useState<string | null>(null);
   
+  // Attraction download progress state
+  const [attractionProgress, setAttractionProgress] = useState({ progress: 0, isDownloading: false });
 
-  
   // Map component ref for refreshing attractions
   const mapComponentRef = useRef<MapComponentRef>(null);
   
@@ -78,6 +79,10 @@ export default function App() {
         setAiPaused(aiService.isDownloadPaused());
       }
       
+      // Attractions progress
+      const attractionProg = offlineMapService.getAttractionDownloadProgress();
+      setAttractionProgress({ progress: attractionProg.progress, isDownloading: attractionProg.isDownloading });
+
       // Check AI queue status if initialized
       if (aiInitialized) {
         const aiService = AIService.getInstance();
@@ -621,6 +626,21 @@ export default function App() {
                   </View>
                 )}
               </TouchableOpacity>
+            )}
+
+            {/* Attractions Download Status */}
+            {attractionProgress.isDownloading && (
+              <View style={styles.downloadStatusItem}>
+                <View style={styles.downloadStatusContent}>
+                  <Ionicons name="star-outline" size={20} color="#2196F3" />
+                  <View style={styles.downloadStatusText}>
+                    <Text style={styles.downloadStatusName}>Attractions</Text>
+                  </View>
+                </View>
+                <View style={styles.progressBarContainer}>
+                  <View style={[styles.progressBar, { width: `${attractionProgress.progress * 100}%`, backgroundColor: '#2196F3' }]} />
+                </View>
+              </View>
             )}
           </View>
         )}
