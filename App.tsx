@@ -6,6 +6,7 @@ import AIService from './services/AIService';
 import MapComponent, { MapComponentRef } from './components/MapComponent';
 import LocationService, { LocationData } from './services/LocationService';
 import OfflineMapService from './services/OfflineMapService';
+import ChatWindow from './components/ChatWindow';
 
 export default function App() {
   const [aiInitialized, setAiInitialized] = useState(false);
@@ -34,9 +35,9 @@ export default function App() {
   const [locationLoading, setLocationLoading] = useState(true);
   const [locationError, setLocationError] = useState<string | null>(null);
   
-  // Map view mode control
-  const [forceViewMode, setForceViewMode] = useState<'current' | 'amsterdam' | null>(null);
-  
+  // Attraction download progress state
+  const [attractionProgress, setAttractionProgress] = useState({ progress: 0, isDownloading: false });
+
   // Map component ref for refreshing attractions
   const mapComponentRef = useRef<MapComponentRef>(null);
   
@@ -78,6 +79,10 @@ export default function App() {
         setAiPaused(aiService.isDownloadPaused());
       }
       
+      // Attractions progress
+      const attractionProg = offlineMapService.getAttractionDownloadProgress();
+      setAttractionProgress({ progress: attractionProg.progress, isDownloading: attractionProg.isDownloading });
+
       // Check AI queue status if initialized
       if (aiInitialized) {
         const aiService = AIService.getInstance();
@@ -186,9 +191,9 @@ export default function App() {
               
               // Show user that we're starting the heavy download/initialization
               Alert.alert(
-                'AI Modeli Yükleniyor', 
-                'LocalTravelBuddy, Gemma 3n AI modelini yüklüyor (2.9GB).\n\nİlk kurulum 5-10 dakika sürebilir.\n\nHazır olduğunda bilgilendirileceksiniz.',
-                [{ text: 'Tamam', style: 'default' }]
+                'AI Model Loading', 
+                'LocalTravelBuddy is downloading the Gemma 3n AI model (2.9GB).\n\nInitial setup may take 5-10 minutes.\n\nYou will be notified when it\'s ready.',
+                [{ text: 'OK', style: 'default' }]
               );
               
               // Add comprehensive progress monitoring
@@ -236,9 +241,9 @@ export default function App() {
         setAiInitialized(true);
         console.log('✅ Gemma 3n AI model fully loaded and ready');
         Alert.alert(
-          'AI Hazır', 
-          'LocalTravelBuddy AI (Gemma 3n) tamamen yüklendi ve hazır!\n\nTüm konum özellikleri kullanılabilir.',
-          [{ text: 'Harika!', style: 'default' }]
+          'AI Ready', 
+          'LocalTravelBuddy AI (Gemma 3n) is fully loaded and ready!\n\nAll location features are now available.',
+          [{ text: 'Great!', style: 'default' }]
         );
         return true;
       } else {
@@ -367,11 +372,8 @@ export default function App() {
                 
                 Alert.alert(
                   'Amsterdam Downloaded! 🇳🇱',
-                  'Amsterdam map tiles and attractions are now available offline!\n\n🗺️ How to access Amsterdam:\n• Use the 🇳🇱 button (bottom-right)\n• Or tap the indicator at top-left of map\n\nYou can now explore Amsterdam without internet!',
-                  [{ text: 'Switch to Amsterdam View', onPress: () => {
-                    setForceViewMode('amsterdam');
-                    setTimeout(() => setForceViewMode(null), 1000);
-                  } }, { text: 'Stay Here', style: 'cancel' }]
+                  'Amsterdam map tiles and attractions are now available offline!\n\nYou can now explore Amsterdam attractions on your map!',
+                  [{ text: 'OK' }]
                 );
               } else {
                 Alert.alert('Download Failed', 'Failed to download map data. Please try again.');
@@ -392,54 +394,16 @@ export default function App() {
 
 
 
-  const handleLocationRefresh = async () => {
-    try {
-      console.log('📍 User requested location refresh...');
-      setLocationLoading(true);
-      setLocationError(null);
-      
-      // Clear cache and get fresh location
-      await locationService.clearCache();
-      const location = await locationService.getCurrentLocation(true);
-      
-      if (location) {
-        setCurrentLocation(location);
-        console.log('📍 Location refreshed:', location.placeName);
-        console.log('📍 Coordinates:', location.latitude, location.longitude);
-        
-        // Check if this is Amsterdam (fallback) or real location
-        const isAmsterdam = Math.abs(location.latitude - 52.3676) < 0.001 && 
-                           Math.abs(location.longitude - 4.9041) < 0.001;
-        
-        if (isAmsterdam) {
-          Alert.alert(
-            'Location Info',
-            'Using Amsterdam as fallback location.\n\nThis happens when:\n• GPS is disabled\n• Using Android emulator\n• Location permissions not granted\n\nTo get your real location:\n• Enable GPS/Location Services\n• Grant location permissions\n• Use a real device with GPS',
-            [{ text: 'OK' }]
-          );
-        } else {
-          Alert.alert('Location Updated', `Found your location: ${location.placeName}`, [{ text: 'OK' }]);
-        }
-      } else {
-        setLocationError('Failed to refresh location');
-        Alert.alert('Location Error', 'Failed to get your location. Using Amsterdam as fallback.', [{ text: 'OK' }]);
-      }
-    } catch (error) {
-      console.error('❌ Location refresh error:', error);
-      setLocationError(`Location refresh error: ${error.message}`);
-    } finally {
-      setLocationLoading(false);
-    }
-  };
+
 
   const handleClearAIQueue = () => {
     Alert.alert(
-      'İstekleri Temizle',
-      `Sırada ${aiProcessingQueue} AI isteği var.\n\nTüm bekleyen istekleri iptal etmek istiyor musunuz?`,
+      'Clear Requests',
+      `There are ${aiProcessingQueue} AI requests in the queue.\n\nDo you want to cancel all pending requests?`,
       [
-        { text: 'Hayır', style: 'cancel' },
+        { text: 'No', style: 'cancel' },
         { 
-          text: 'Temizle', 
+          text: 'Clear', 
           style: 'destructive',
           onPress: () => {
             const aiService = AIService.getInstance();
@@ -471,13 +435,13 @@ export default function App() {
 
     // If AI is still loading, return
     if (aiLoading) {
-      console.log('⚠️ AI Yükleniyor: AI model hala yükleniyor. Lütfen indirme tamamlanana kadar bekleyin.');
+      console.log('⚠️ AI Loading: AI model is still loading. Please wait until the download is complete.');
       return;
     }
 
     // AI must be ready to proceed
     if (!aiInitialized) {
-      console.log('⚠️ AI Hazır Değil: AI model henüz hazır değil. Lütfen önce AI modelini indirin.');
+      console.log('⚠️ AI Not Ready: AI model is not ready yet. Please download the AI model first.');
       return;
     }
 
@@ -499,9 +463,9 @@ export default function App() {
       let query = '';
       if (clickData.attractionData) {
         const attraction = clickData.attractionData;
-        query = `${attraction.name} hakkında tarihi, turistik ve ilginç bilgiler ver.`;
+        query = `Give me historical, touristic, and interesting facts about ${attraction.name}.`;
       } else if (clickData.attraction) {
-        query = `${clickData.attraction} hakkında tarihi, turistik ve ilginç bilgiler ver.`;
+        query = `What do you know about ${clickData.attraction}? I would like to hear historical, touristic, and interesting facts.`;
       }
       
       const response = await aiService.processText(query);
@@ -511,13 +475,13 @@ export default function App() {
       if (response.error) {
         // Handle specific error types - log to console instead of showing white popups
         if (response.error === 'Context busy') {
-          console.log('⚠️ AI Meşgul: AI model şu anda meşgul. İstek sıraya alındı, lütfen bekleyin.');
+          console.log('⚠️ AI Busy: The AI model is currently busy. The request has been queued, please wait.');
         } else if (response.error === 'Request timeout') {
-          console.log('⚠️ Zaman Aşımı: İstek çok uzun sürdü. Lütfen tekrar deneyin.');
+          console.log('⚠️ Timeout: The request took too long. Please try again.');
         } else if (response.error === 'Request cancelled') {
-          console.log('⚠️ İptal Edildi: İstek iptal edildi.');
+          console.log('⚠️ Cancelled: The request was cancelled.');
         } else {
-          console.log('⚠️ Hata:', response.error);
+          console.log('⚠️ Error:', response.error);
         }
       } else {
         // Response is already displayed in the dark overlay
@@ -525,7 +489,7 @@ export default function App() {
       }
     } catch (error) {
       console.error('Error processing attraction query:', error);
-      console.log('⚠️ Hata: Mekan bilgisi alınırken bir hata oluştu. Lütfen tekrar deneyin.');
+      console.log('⚠️ Error: An error occurred while retrieving place information. Please try again.');
     } finally {
       setIsProcessingLocation(false);
     }
@@ -567,6 +531,8 @@ export default function App() {
     return parts;
   };
 
+  const [chatOpen, setChatOpen] = useState(false);
+
   return (
     <View style={styles.container}>
       {/* Real MapLibre Map */}
@@ -575,7 +541,6 @@ export default function App() {
           ref={mapComponentRef}
           style={styles.map}
           currentLocation={currentLocation}
-          forceViewMode={forceViewMode}
           onMapPress={(clickData) => {
             console.log('🗺️ Map pressed at:', clickData);
             handleMapPress(clickData);
@@ -585,7 +550,15 @@ export default function App() {
         {/* Last AI Response Display */}
         {lastAiResponse && !isProcessingLocation && (
           <View style={styles.responseOverlay}>
-            <ScrollView style={styles.responseScrollView} showsVerticalScrollIndicator={true}>
+            <TouchableOpacity
+              style={{ position: 'absolute', top: 6, right: 6, zIndex: 2, padding: 6 }}
+              onPress={() => setLastAiResponse('')}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="close" size={20} color="#fff" />
+            </TouchableOpacity>
+            <ScrollView style={[styles.responseScrollView, { paddingTop: 10 }]}
+              showsVerticalScrollIndicator={true}>
               <Text style={styles.responseText}>
                 🤖 {parseFormattedText(lastAiResponse).map((part, index) => (
                   <Text key={index} style={part.bold ? styles.boldText : null}>
@@ -654,72 +627,59 @@ export default function App() {
                 )}
               </TouchableOpacity>
             )}
+
+            {/* Attractions Download Status */}
+            {attractionProgress.isDownloading && (
+              <View style={styles.downloadStatusItem}>
+                <View style={styles.downloadStatusContent}>
+                  <Ionicons name="star-outline" size={20} color="#2196F3" />
+                  <View style={styles.downloadStatusText}>
+                    <Text style={styles.downloadStatusName}>Attractions</Text>
+                  </View>
+                </View>
+                <View style={styles.progressBarContainer}>
+                  <View style={[styles.progressBar, { width: `${attractionProgress.progress * 100}%`, backgroundColor: '#2196F3' }]} />
+                </View>
+              </View>
+            )}
           </View>
         )}
 
-        {/* Amsterdam View Button - Show when map is downloaded */}
-        {mapDownloaded && (
-          <TouchableOpacity 
-            style={[
-              styles.floatingButton,
-              styles.amsterdamButton,
-            ]} 
-            onPress={() => {
-              // Force the map to show Amsterdam
-              console.log('🇳🇱 Switching to Amsterdam view...');
-              setForceViewMode('amsterdam');
-              
-              // Reset after a short delay so user can toggle again
-              setTimeout(() => {
-                setForceViewMode(null);
-              }, 1000);
-            }}
-          >
-            <Text style={styles.amsterdamButtonText}>🇳🇱</Text>
-          </TouchableOpacity>
-        )}
 
-        {/* Location Refresh Button - Only show when ready */}
-        {mapDownloaded && aiInitialized && (
-          <TouchableOpacity 
-            style={[
-              styles.floatingButton,
-              styles.locationButton,
-              locationLoading && styles.disabledButton
-            ]} 
-            onPress={handleLocationRefresh}
-            disabled={locationLoading}
-          >
-            <Ionicons 
-              name="location-outline" 
-              size={24} 
-              color={locationLoading ? "#666" : "#ffffff"} 
-            />
-          </TouchableOpacity>
-        )}
+
+
 
         {/* AI Processing status overlay */}
         {(isProcessingLocation || aiCurrentlyProcessing || aiProcessingQueue > 0) && (
           <View style={styles.processingOverlay}>
             <ActivityIndicator size="large" color="#ffffff" />
             <Text style={styles.processingText}>
-              {isProcessingLocation ? 'AI Analiz Ediyor...' : 'AI İşlem Yapıyor...'}
+              {isProcessingLocation ? 'AI is analyzing...' : 'AI is processing...'}
             </Text>
             <Text style={styles.processingSubtext}>
               {aiProcessingQueue > 0 
-                ? `Sırada ${aiProcessingQueue} istek var` 
-                : 'Lütfen bekleyin'}
+                ? `${aiProcessingQueue} requests in queue` 
+                : 'Please wait'}
             </Text>
             {aiProcessingQueue > 2 && (
               <TouchableOpacity 
                 style={styles.clearQueueButton}
                 onPress={handleClearAIQueue}
               >
-                <Text style={styles.clearQueueButtonText}>İstekleri Temizle</Text>
+                <Text style={styles.clearQueueButtonText}>Clear Requests</Text>
               </TouchableOpacity>
             )}
           </View>
         )}
+
+        {/* Floating Chat Button */}
+        {!chatOpen && (
+          <TouchableOpacity style={styles.floatingButton} onPress={() => setChatOpen(true)}>
+            <Ionicons name="chatbubble-ellipses-outline" size={28} color="#fff" />
+          </TouchableOpacity>
+        )}
+        {/* Chat Window Overlay */}
+        <ChatWindow visible={chatOpen} onClose={() => setChatOpen(false)} />
 
       </View>
 
@@ -891,10 +851,7 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: 'rgba(255, 255, 255, 0.3)',
   },
-  locationButton: {
-    backgroundColor: 'rgba(255, 152, 0, 0.7)',
-    marginRight: 20,
-  },
+
   downloadButton: {
     backgroundColor: 'rgba(76, 175, 80, 0.7)',
     marginRight: 20,
@@ -1089,13 +1046,5 @@ const styles = StyleSheet.create({
     shadowRadius: 3.84,
     elevation: 5,
   },
-  amsterdamButton: {
-    backgroundColor: 'rgba(255, 102, 0, 0.9)',
-    bottom: 90,
-  },
-  amsterdamButtonText: {
-    fontSize: 24,
-    color: '#fff',
-    fontWeight: 'bold',
-  },
+
 });

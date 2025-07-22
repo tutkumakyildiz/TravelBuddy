@@ -164,11 +164,9 @@ class LocationService {
       
       this.watchSubscription = await Location.watchPositionAsync(
         {
-          accuracy: this.config.enableHighAccuracy 
-            ? Location.Accuracy.BestForNavigation 
-            : Location.Accuracy.Balanced,
-          timeInterval: 10000, // Update every 10 seconds
-          distanceInterval: 10, // Update every 10 meters
+          accuracy: Location.Accuracy.BestForNavigation, // Always use best accuracy for direction
+          timeInterval: 5000, // Update every 5 seconds for better direction tracking
+          distanceInterval: 5, // Update every 5 meters for better direction tracking
         },
         async (locationUpdate) => {
           const placeName = await this.reverseGeocode(
@@ -244,9 +242,7 @@ class LocationService {
       console.log('📍 Requesting GPS location...');
       
       const location = await Location.getCurrentPositionAsync({
-        accuracy: this.config.enableHighAccuracy 
-          ? Location.Accuracy.BestForNavigation 
-          : Location.Accuracy.Balanced,
+        accuracy: Location.Accuracy.BestForNavigation, // Always use best accuracy for direction
         mayShowUserSettingsDialog: true,
       });
       

@@ -19,7 +19,6 @@ interface MapComponentProps {
     longitude: number;
     placeName?: string;
   };
-  forceViewMode?: 'current' | 'amsterdam' | null;
 }
 
 interface MapComponentRef {
@@ -29,8 +28,7 @@ interface MapComponentRef {
 const MapComponent = forwardRef<MapComponentRef, MapComponentProps>(({ 
   style, 
   onMapPress, 
-  currentLocation,
-  forceViewMode
+  currentLocation
 }, ref) => {
   const webViewRef = useRef<WebView>(null);
   const [userLocation, setUserLocation] = useState<Location.LocationObject | null>(null);
@@ -42,10 +40,8 @@ const MapComponent = forwardRef<MapComponentRef, MapComponentProps>(({
     attractionCount: 0,
     categories: []
   });
-  const [viewMode, setViewMode] = useState<'current' | 'amsterdam'>('current');
-  const [isViewModeToggling, setIsViewModeToggling] = useState(false);
   
-  // Amsterdam center coordinates as default
+  // Amsterdam center coordinates as default fallback
   const amsterdamCenter = { latitude: 52.3676, longitude: 4.9041 };
 
   useEffect(() => {
@@ -53,20 +49,13 @@ const MapComponent = forwardRef<MapComponentRef, MapComponentProps>(({
     initializeMap();
   }, []);
 
-  // Effect to handle view mode changes
+  // Effect to handle location changes and update map center
   useEffect(() => {
-    if (mapLoaded && !isViewModeToggling) {
+    if (mapLoaded) {
       updateMapCenter();
+      updateLocationMarker();
     }
-  }, [viewMode, mapLoaded, currentLocation, userLocation, offlineDataStatus]);
-
-  // Effect to handle forceViewMode prop changes
-  useEffect(() => {
-    if (forceViewMode && forceViewMode !== viewMode) {
-      setViewMode(forceViewMode);
-      console.log('🗺️ View mode forced to:', forceViewMode);
-    }
-  }, [forceViewMode]);
+  }, [mapLoaded, currentLocation, userLocation, offlineDataStatus]);
 
   // Expose refreshAttractions method through ref
   useImperativeHandle(ref, () => ({
@@ -78,7 +67,7 @@ const MapComponent = forwardRef<MapComponentRef, MapComponentProps>(({
   }), []);
 
   // Create a key that changes when attractions are loaded to force WebView reload
-  const webViewKey = `map-${viewMode}-${attractions.length}`;
+  const webViewKey = `map-current-${attractions.length}`;
 
   const initializeMap = async () => {
     try {
@@ -148,34 +137,7 @@ const MapComponent = forwardRef<MapComponentRef, MapComponentProps>(({
     }
   };
 
-  // Toggle between current location and Amsterdam views
-  const toggleViewMode = () => {
-    if (isViewModeToggling) return;
-    
-    setIsViewModeToggling(true);
-    
-    if (viewMode === 'current') {
-      // Switch to Amsterdam
-      if (offlineDataStatus.attractionsDownloaded) {
-        setViewMode('amsterdam');
-        console.log('🗺️ Switching to Amsterdam view');
-      } else {
-        Alert.alert(
-          'Amsterdam Data Not Available',
-          'Please download Amsterdam map data first to view Amsterdam attractions.',
-          [{ text: 'OK' }]
-        );
-      }
-    } else {
-      // Switch to current location
-      setViewMode('current');
-      console.log('🗺️ Switching to current location view');
-    }
-    
-    setTimeout(() => setIsViewModeToggling(false), 300);
-  };
-
-  // Update map center based on view mode
+  // Update map center based on current location
   const updateMapCenter = () => {
     if (webViewRef.current && mapLoaded) {
       const center = getActiveCenter();
@@ -183,19 +145,50 @@ const MapComponent = forwardRef<MapComponentRef, MapComponentProps>(({
         action: 'updateCenter',
         latitude: center.latitude,
         longitude: center.longitude,
-        zoom: viewMode === 'amsterdam' ? 13 : 14
+        zoom: 14
       });
       webViewRef.current.postMessage(message);
       console.log('📍 Updated map center to:', center);
     }
   };
 
-  // Get active center based on view mode
-  const getActiveCenter = () => {
-    if (viewMode === 'amsterdam') {
-      return amsterdamCenter;
+  // Update location marker with GPS data
+  const updateLocationMarker = () => {
+    if (webViewRef.current && mapLoaded) {
+      let locationData = null;
+      
+      if (currentLocation) {
+        locationData = {
+          latitude: currentLocation.latitude,
+          longitude: currentLocation.longitude,
+          heading: (currentLocation as any).heading,
+          accuracy: (currentLocation as any).accuracy
+        };
+      } else if (userLocation) {
+        locationData = {
+          latitude: userLocation.coords.latitude,
+          longitude: userLocation.coords.longitude,
+          heading: userLocation.coords.heading,
+          accuracy: userLocation.coords.accuracy
+        };
+      }
+      
+      if (locationData) {
+        const message = JSON.stringify({
+          action: 'updateLocation',
+          latitude: locationData.latitude,
+          longitude: locationData.longitude,
+          heading: locationData.heading,
+          accuracy: locationData.accuracy
+        });
+        webViewRef.current.postMessage(message);
+        console.log('📍 Updated location marker - heading:', locationData.heading, 'accuracy:', locationData.accuracy);
+      }
     }
-    
+  };
+
+  // Get active center - prioritize currentLocation, then userLocation, then Amsterdam as fallback
+  const getActiveCenter = () => {
     if (currentLocation) {
       return { latitude: currentLocation.latitude, longitude: currentLocation.longitude };
     } else if (userLocation) {
@@ -241,6 +234,59 @@ const MapComponent = forwardRef<MapComponentRef, MapComponentProps>(({
         body { margin: 0; padding: 0; }
         #map { height: 100vh; width: 100vw; }
         .marker-popup { font-size: 14px; }
+        
+        /* Google Maps style current location indicator */
+        .google-location-marker {
+          width: 40px;
+          height: 40px;
+          border-radius: 50%;
+          background-color: rgba(66, 133, 244, 0.3);
+          border: 2px solid #4285f4;
+          position: relative;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          animation: pulse-location 2s infinite;
+        }
+        
+        .google-location-dot {
+          width: 16px;
+          height: 16px;
+          border-radius: 50%;
+          background-color: #4285f4;
+          border: 2px solid #ffffff;
+          position: absolute;
+          z-index: 2;
+        }
+        
+        .google-location-direction {
+          width: 0;
+          height: 0;
+          border-left: 6px solid transparent;
+          border-right: 6px solid transparent;
+          border-bottom: 12px solid #4285f4;
+          position: absolute;
+          top: -8px;
+          left: 50%;
+          transform: translateX(-50%);
+          z-index: 3;
+          filter: drop-shadow(0 1px 2px rgba(0,0,0,0.3));
+        }
+        
+        @keyframes pulse-location {
+          0% { 
+            transform: scale(1); 
+            opacity: 1; 
+          }
+          50% { 
+            transform: scale(1.1); 
+            opacity: 0.8; 
+          }
+          100% { 
+            transform: scale(1); 
+            opacity: 1; 
+          }
+        }
         
         /* Google Maps style attraction circles */
         .attraction-circle {
@@ -484,17 +530,87 @@ const MapComponent = forwardRef<MapComponentRef, MapComponentProps>(({
           return iconMap[category] || '📍';
         }
         
-        // Add location markers
-        if (currentLocation) {
-          L.marker([currentLocation.latitude, currentLocation.longitude])
-            .addTo(map)
-            .bindPopup('<div class="marker-popup"><b>Current Location</b><br/>' + (currentLocation.placeName || 'You are here') + '</div>');
+        // Function to create Google Maps-style location marker
+        function createGoogleLocationMarker(lat, lng, heading, accuracy) {
+          const locationData = currentLocation || userLocation;
+          let directionElement = '';
+          
+          // Add direction arrow if heading is available
+          if (heading !== null && heading !== undefined && !isNaN(heading)) {
+            directionElement = '<div class="google-location-direction"></div>';
+          }
+          
+          const googleLocationHtml = \`
+            <div class="google-location-marker">
+              <div class="google-location-dot"></div>
+              \${directionElement}
+            </div>
+          \`;
+          
+          const googleLocationIcon = L.divIcon({
+            html: googleLocationHtml,
+            className: 'google-location-container',
+            iconSize: [40, 40],
+            iconAnchor: [20, 20],
+            popupAnchor: [0, -20]
+          });
+          
+          const marker = L.marker([lat, lng], {
+            icon: googleLocationIcon
+          }).addTo(map);
+          
+          // Rotate the direction arrow based on heading
+          if (heading !== null && heading !== undefined && !isNaN(heading)) {
+            const markerElement = marker.getElement();
+            if (markerElement) {
+              const directionArrow = markerElement.querySelector('.google-location-direction');
+              if (directionArrow) {
+                // Convert heading to CSS rotation (0° = North, 90° = East, etc.)
+                const rotationAngle = heading;
+                directionArrow.style.transform = \`translateX(-50%) rotate(\${rotationAngle}deg)\`;
+              }
+            }
+          }
+          
+          // Create popup content
+          const popupContent = \`
+            <div class="marker-popup">
+              <b>📍 Current Location</b><br/>
+              \${locationData && locationData.placeName ? locationData.placeName : 'You are here'}<br/>
+              <small>GPS Connected</small>
+              \${accuracy ? \`<br/><small>Accuracy: \${Math.round(accuracy)}m</small>\` : ''}
+              \${heading !== null && heading !== undefined ? \`<br/><small>Direction: \${Math.round(heading)}°</small>\` : ''}
+            </div>
+          \`;
+          
+          marker.bindPopup(popupContent);
+          
+          return marker;
         }
         
-        if (userLocation && !currentLocation) {
-          L.marker([userLocation.latitude, userLocation.longitude])
-            .addTo(map)
-            .bindPopup('<div class="marker-popup"><b>Your Location</b><br/>GPS Location</div>');
+        // Add Google Maps-style location markers
+        if (currentLocation) {
+          const heading = currentLocation.heading;
+          const accuracy = currentLocation.accuracy;
+          console.log('📍 Adding current location marker with heading:', heading, 'accuracy:', accuracy);
+          
+          currentLocationMarker = createGoogleLocationMarker(
+            currentLocation.latitude, 
+            currentLocation.longitude,
+            heading,
+            accuracy
+          );
+        } else if (userLocation) {
+          const heading = userLocation.heading;
+          const accuracy = userLocation.accuracy;
+          console.log('📍 Adding user location marker with heading:', heading, 'accuracy:', accuracy);
+          
+          currentLocationMarker = createGoogleLocationMarker(
+            userLocation.latitude, 
+            userLocation.longitude,
+            heading,
+            accuracy
+          );
         }
         
         // Handle map double tap for general locations
@@ -541,6 +657,9 @@ const MapComponent = forwardRef<MapComponentRef, MapComponentProps>(({
           }
         });
         
+        // Store current location marker for updates
+        let currentLocationMarker = null;
+        
         // Handle messages from React Native
         function handleMessage(messageData) {
           try {
@@ -554,6 +673,22 @@ const MapComponent = forwardRef<MapComponentRef, MapComponentProps>(({
             if (data.action === 'updateCenter') {
               console.log('Updating map center to:', data.latitude, data.longitude, 'with zoom:', data.zoom);
               map.setView([data.latitude, data.longitude], data.zoom);
+            } else if (data.action === 'updateLocation') {
+              // Update location marker with new position and heading
+              console.log('Updating location marker to:', data.latitude, data.longitude, 'heading:', data.heading);
+              
+              // Remove existing marker if exists
+              if (currentLocationMarker) {
+                map.removeLayer(currentLocationMarker);
+              }
+              
+              // Create new marker with updated location and heading
+              currentLocationMarker = createGoogleLocationMarker(
+                data.latitude, 
+                data.longitude,
+                data.heading,
+                data.accuracy
+              );
             }
           } catch (error) {
             console.error('Error parsing WebView message:', error);
@@ -610,26 +745,7 @@ const MapComponent = forwardRef<MapComponentRef, MapComponentProps>(({
       />
 
       {/* View Mode Toggle */}
-      <TouchableOpacity
-        style={[
-          styles.viewModeIndicator,
-          isViewModeToggling && styles.viewModeDisabled
-        ]}
-        onPress={toggleViewMode}
-        disabled={isViewModeToggling}
-      >
-        <Text style={styles.viewModeText}>
-          {viewMode === 'amsterdam' ? '🇳🇱 Amsterdam' : '📍 My Location'}
-        </Text>
-        {offlineDataStatus.attractionsDownloaded && (
-          <Text style={styles.viewModeSubText}>
-            {viewMode === 'amsterdam' 
-              ? `${offlineDataStatus.attractionCount} attractions` 
-              : 'Tap to see Amsterdam'
-            }
-          </Text>
-        )}
-      </TouchableOpacity>
+      {/* Removed View Mode Toggle */}
     </View>
   );
 });
@@ -653,34 +769,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#666',
   },
-  viewModeIndicator: {
-    position: 'absolute',
-    top: 60,
-    left: 20,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    paddingHorizontal: 15,
-    paddingVertical: 8,
-    borderRadius: 20,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-  viewModeText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
-    textAlign: 'center',
-  },
-  viewModeSubText: {
-    color: '#ccc',
-    fontSize: 12,
-    textAlign: 'center',
-    marginTop: 2,
-  },
-  viewModeDisabled: {
-    opacity: 0.6,
-  },
+
 });
 
 export default MapComponent;
